@@ -1,0 +1,16 @@
+{
+  "video": "Management_Agent_Classifier_Demo.mp4",
+  "duration_seconds": 78.667,
+  "decode_exit_code": 0,
+  "metadata": [
+    "Duration: 00:01:18.67, start: 0.000000, bitrate: 383 kb/s",
+    "Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080, 250 kb/s, 24 fps, 24 tbr, 12288 tbn (default)",
+    "Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, mono, fltp, 127 kb/s (default)",
+    "[Parsed_volumedetect_0 @ 000001f4416fcc00] mean_volume: -16.5 dB",
+    "[Parsed_volumedetect_0 @ 000001f4416fcc00] max_volume: -1.4 dB"
+  ],
+  "sha256": "ccf70bc1cfee6f7c4bafe8549a016c24e976c85a678bfefa9275a090e954b72a",
+  "size_bytes": 3771438,
+  "captions": 13,
+  "source": "Edited walkthrough of browser captures, synthetic messages, local Windows speech narration."
+}

@@ -1,0 +1,91 @@
+[
+  {
+    "id": "01-intro",
+    "kind": "intro",
+    "eyebrow": "MANAGEMENT AGENT / PHASE 01",
+    "title": "A clearer start\nfor every request.",
+    "narration": [
+      "Meet Management Agent, a classifier for condominium resident requests.",
+      "It turns a message into a category, priority, and suggested team."
+    ]
+  },
+  {
+    "id": "02-intake",
+    "kind": "screen",
+    "capture": "01-intake.jpg",
+    "eyebrow": "01 / RESIDENT INTAKE",
+    "title": "Start with the resident's words.",
+    "callout_title": "One message in.",
+    "callouts": ["Free-text request", "Optional location", "10 fixed categories"],
+    "note": "Actual app screens. Synthetic messages.",
+    "narration": [
+      "A resident reports a flickering corridor light. Staff enter the message and, optionally, its location."
+    ]
+  },
+  {
+    "id": "03-classification",
+    "kind": "screen",
+    "capture": "02-maintenance.jpg",
+    "eyebrow": "02 / STRUCTURED CLASSIFICATION",
+    "title": "A decision staff can inspect.",
+    "callout_title": "Maintenance.",
+    "callouts": ["Normal priority", "Suggested team", "Visible model score"],
+    "note": "A model score is not validated accuracy.",
+    "narration": [
+      "The classifier identifies maintenance and suggests the maintenance team.",
+      "The model score stays visible, and uncertain requests are flagged for review."
+    ]
+  },
+  {
+    "id": "04-emergency",
+    "kind": "screen",
+    "capture": "03-emergency.jpg",
+    "eyebrow": "03 / URGENT REPORTS",
+    "title": "Bring urgent reports to a person.",
+    "callout_title": "Human action.",
+    "callouts": ["Emergency flag", "Location captured", "Staff triage required"],
+    "note": "No emergency dispatch is performed.",
+    "narration": [
+      "A child trapped in a lift triggers an emergency flag before any model call.",
+      "The app prompts human action; it does not dispatch help."
+    ]
+  },
+  {
+    "id": "05-batch",
+    "kind": "screen",
+    "capture": "04-batch.jpg",
+    "eyebrow": "04 / BATCH REVIEW",
+    "title": "Work through a small inbox.",
+    "callout_title": "Review together.",
+    "callouts": ["Upload a CSV", "Inspect every row", "Export the results"],
+    "note": "Suggestions only. No tickets are created.",
+    "narration": [
+      "Staff can upload a CSV inbox, inspect the classifications, and export the results.",
+      "No tickets are created automatically."
+    ]
+  },
+  {
+    "id": "06-evaluation",
+    "kind": "screen",
+    "capture": "05-evaluation.jpg",
+    "eyebrow": "05 / EVALUATION",
+    "title": "Measure before expanding.",
+    "callout_title": "53 of 55.",
+    "callouts": ["Categories correct", "Synthetic examples", "87% sent to review"],
+    "note": "Includes safety rules. Real-world accuracy is unverified.",
+    "narration": [
+      "The starter workflow classified fifty three of fifty five synthetic examples correctly.",
+      "This is a development check, not real resident accuracy."
+    ]
+  },
+  {
+    "id": "07-next",
+    "kind": "outro",
+    "eyebrow": "CLASSIFIER FIRST / AGENTS LATER",
+    "title": "A working foundation.\nA measurable next step.",
+    "narration": [
+      "The offline demo is ready. The Ollama adapter still needs live model evaluation.",
+      "Next: label real resident requests and calibrate the classifier."
+    ]
+  }
+]

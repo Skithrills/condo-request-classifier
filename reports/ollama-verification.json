@@ -1,0 +1,136 @@
+{
+  "verified_at": "2026-10-02T17:02:07.970511+00:00",
+  "method": "Terminal-only installation, real local HTTP inference, Streamlit AppTest with real Ollama; no desktop control",
+  "ollama_version": {
+    "version": "0.35.0"
+  },
+  "installed_model": {
+    "name": "gemma3:4b",
+    "model": "gemma3:4b",
+    "modified_at": "2026-10-03T00:54:09.6026118+08:00",
+    "size": 3338801804,
+    "digest": "a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a",
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "gemma3",
+      "families": [
+        "gemma3"
+      ],
+      "parameter_size": "4.3B",
+      "quantization_level": "Q4_K_M",
+      "context_length": 131072,
+      "embedding_length": 2560
+    },
+    "capabilities": [
+      "completion",
+      "vision"
+    ]
+  },
+  "loaded_model": {
+    "name": "gemma3:4b",
+    "model": "gemma3:4b",
+    "size": 2875520450,
+    "digest": "a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a",
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "gemma3",
+      "families": [
+        "gemma3"
+      ],
+      "parameter_size": "4.3B",
+      "quantization_level": "Q4_K_M"
+    },
+    "expires_at": "2026-10-03T01:07:07.8477513+08:00",
+    "size_vram": 2875520450,
+    "context_length": 4096
+  },
+  "runtime_release_sha256": "d6f7d3dd4f5d013553a78c1e78b2521fcf41d43dd2863e4596cdc046fe6036db",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 3080",
+    "vram_mib": 10240,
+    "ram_gib": 31.9,
+    "driver": "616.92"
+  },
+  "server": {
+    "listen": "127.0.0.1:11434",
+    "context_length": 4096,
+    "parallel_requests": 1,
+    "windows_autostart": false
+  },
+  "first_cold_classification_ms": 86598.8,
+  "evaluation": {
+    "path": "reports/ollama-evaluation.json",
+    "attempted_model_requests": 50,
+    "valid_model_responses": 48,
+    "rejected_responses": 2,
+    "correct_valid_categories": 42,
+    "correct_valid_categories_per_attempt": 0.84,
+    "median_valid_latency_ms": 1094.85,
+    "mean_valid_latency_ms": 1123.69375,
+    "safety_rule_cases": 5,
+    "mean_all_model_attempts_ms": 1316.566
+  },
+  "app_smoke": {
+    "classification": {
+      "schema_version": "1.0",
+      "category": "maintenance",
+      "priority": "normal",
+      "suggested_team": "Maintenance team",
+      "review_required": true,
+      "review_reasons": [
+        "LLM confidence is not calibrated; staff must confirm the classification."
+      ],
+      "missing_details": [],
+      "location": "Block A lobby",
+      "confidence": 0.9,
+      "confidence_kind": "self_reported",
+      "category_scores": {},
+      "evidence": [
+        "The ceiling light in the Block A lobby keeps flickering."
+      ],
+      "backend": "ollama_local",
+      "model": "gemma3:4b",
+      "status": "needs_review",
+      "elapsed_ms": 1101.0
+    },
+    "emergency": {
+      "schema_version": "1.0",
+      "category": "maintenance",
+      "priority": "emergency",
+      "suggested_team": "Maintenance team",
+      "review_required": true,
+      "review_reasons": [
+        "Urgent report requires staff triage."
+      ],
+      "missing_details": [],
+      "location": "Block B",
+      "confidence": null,
+      "confidence_kind": "unavailable",
+      "category_scores": {},
+      "evidence": [
+        "trapped in the lift"
+      ],
+      "backend": "safety_rules",
+      "model": "english-safety-screen-v1",
+      "status": "safety_escalation",
+      "elapsed_ms": 3.3
+    }
+  },
+  "test_suite": {
+    "passed": 63,
+    "ruff_check": "passed",
+    "ruff_format": "passed"
+  },
+  "groq": {
+    "key_configured": false,
+    "adapter_implemented": false,
+    "live_inference_verified": false
+  },
+  "limitations": [
+    "Synthetic development examples only, not independent real-world validation.",
+    "One rejected response matches other by fallback; exclude it from model-success accuracy.",
+    "Warmed latency measured on a workstation with other applications running."
+  ]
+}

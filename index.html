@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A classifier-first condominium management prototype: resident messages become categories, priorities, suggested teams and staff review decisions.">
+  <title>Condominium Request Classifier — Project Showcase</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b202b; --panel:#122e39; --ink:#f5f8f5; --muted:#adc5ca; --mint:#76e1bd; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:17px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main,footer { max-width:1160px; margin:auto; padding:0 28px; }
+    header { padding:64px 0 42px; }
+    .eyebrow { color:var(--mint); text-transform:uppercase; letter-spacing:.16em; font-size:12px; font-weight:700; }
+    h1 { font-size:clamp(34px,6vw,68px); line-height:1.08; letter-spacing:-.04em; max-width:900px; margin:20px 0; }
+    h2 { font-size:clamp(25px,3vw,36px); letter-spacing:-.025em; margin:0 0 12px; }
+    p { max-width:780px; color:var(--muted); }
+    a { color:var(--mint); text-underline-offset:4px; }
+    a:hover { color:white; }
+    a:focus-visible,summary:focus-visible,video:focus-visible { outline:3px solid var(--mint); outline-offset:5px; }
+    nav { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; }
+    .button { display:inline-block; border:1px solid #54727b; padding:10px 18px; border-radius:7px; text-decoration:none; font-size:15px; font-weight:650; }
+    .button.primary { color:var(--bg); background:var(--mint); border-color:var(--mint); }
+    section { margin-bottom:64px; scroll-margin-top:24px; }
+    img,video { display:block; width:100%; height:auto; border-radius:9px; background:var(--panel); }
+    video { max-height:75vh; }
+    figure { margin:0; }
+    figcaption { font-size:14px; color:var(--muted); margin-top:10px; }
+    .pair { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+    .slides { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin-top:28px; }
+    .note { padding:18px 22px; border-left:3px solid var(--mint); background:var(--panel); border-radius:0 8px 8px 0; }
+    .note p { margin:0; }
+    code { color:var(--ink); }
+    footer { border-top:1px solid #36515c; padding-top:24px; padding-bottom:40px; font-size:14px; }
+    @media(max-width:650px) { main,footer { padding-left:20px; padding-right:20px; } header { padding-top:36px; } .pair,.slides { grid-template-columns:1fr; } section { margin-bottom:44px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Management Agent · Classifier prototype</div>
+    <h1>Resident requests.<br>Structured decisions.</h1>
+    <p>A condominium request classifier that identifies the issue, priority and suggested team, with clear reasons for staff review. Built with Streamlit, LangGraph, an offline baseline and optional local Gemma inference.</p>
+    <nav aria-label="Showcase navigation">
+      <a class="button primary" href="#demo">Watch the demo</a>
+      <a class="button" href="#slides">View the slides</a>
+      <a class="button" href="https://github.com/Skithrills/condo-request-classifier">Source &amp; setup</a>
+      <a class="button" href="https://github.com/Skithrills/condo-request-classifier/releases/latest">Download presentation pack</a>
+    </nav>
+  </header>
+  <section aria-label="Project overview">
+    <figure>
+      <a href="output/hero/01-classifier-showcase.png"><img src="output/hero/01-classifier-showcase.png" width="1672" height="941" alt="Project hero illustration showing a resident request becoming a structured classifier result."></a>
+      <figcaption>Project overview illustration. <a href="output/hero/01-classifier-showcase.png" download>Download image</a></figcaption>
+    </figure>
+  </section>
+  <section id="demo">
+    <div class="eyebrow">01 / Walkthrough</div>
+    <h2>The working classifier, in 79 seconds.</h2>
+    <p>A narrated walkthrough of real app captures: resident intake, maintenance, emergency review, batch uploads and evaluation. Demonstration requests are synthetic. Captions are included in the video.</p>
+    <video controls playsinline preload="metadata" poster="output/demo/poster.png" aria-label="Narrated classifier demonstration with captions">
+      <source src="output/demo/Management_Agent_Classifier_Demo.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="output/demo/Management_Agent_Classifier_Demo.mp4">Download the MP4</a>.
+    </video>
+    <p><a href="output/demo/Management_Agent_Classifier_Demo.mp4" download>Download MP4</a> · <a href="output/demo/captions.srt" download>Download captions</a></p>
+    <div class="note"><p>The video shows the offline baseline. Later local <code>gemma3:4b</code> results appear in the slides and README. This presentation page does not run inference; download the project to classify new requests.</p></div>
+  </section>
+  <section>
+    <div class="eyebrow">02 / Design</div>
+    <h2>How a request becomes a decision.</h2>
+    <p>Validated input flows through safety rules, classification and review policy. The output suggests a category, priority and team; it does not create work tickets or dispatch staff.</p>
+    <figure>
+      <a href="output/hero/02-classifier-architecture.png"><img loading="lazy" src="output/hero/02-classifier-architecture.png" width="1672" height="941" alt="Classifier architecture showing validated resident input, safety screening, offline or Ollama classification, review policy and structured output."></a>
+      <figcaption>Architecture illustration. <a href="output/hero/02-classifier-architecture.png" download>Download image</a></figcaption>
+    </figure>
+  </section>
+  <section id="slides">
+    <div class="eyebrow">03 / Presentation</div>
+    <h2>Eight slides. The complete project story.</h2>
+    <p>Open a preview at full size, read the PDF, or download the editable PowerPoint. The final startup slide records the original workstation; use the repository README for setup on another machine.</p>
+    <nav aria-label="Presentation downloads">
+      <a class="button primary" href="output/slides/Management_Agent_Classifier_Showcase.pdf">Read PDF</a>
+      <a class="button" href="output/slides/Management_Agent_Classifier_Showcase.pptx" download>Download PowerPoint</a>
+      <a class="button" href="output/slides/index.html">Open slide viewer</a>
+    </nav>
+    <div class="slides">
+      <figure><a href="output/slides/slide-01.png"><img loading="lazy" src="output/slides/slide-01.png" alt="Slide 1: Management Agent project introduction"></a><figcaption>01 / Project introduction</figcaption></figure>
+      <figure><a href="output/slides/slide-02.png"><img loading="lazy" src="output/slides/slide-02.png" alt="Slide 2: Resident request intake"></a><figcaption>02 / Resident intake</figcaption></figure>
+      <figure><a href="output/slides/slide-03.png"><img loading="lazy" src="output/slides/slide-03.png" alt="Slide 3: Classifier workflow"></a><figcaption>03 / Classifier workflow</figcaption></figure>
+      <figure><a href="output/slides/slide-04.png"><img loading="lazy" src="output/slides/slide-04.png" alt="Slide 4: Structured classification result"></a><figcaption>04 / Classification result</figcaption></figure>
+      <figure><a href="output/slides/slide-05.png"><img loading="lazy" src="output/slides/slide-05.png" alt="Slide 5: Staff review and safety escalation"></a><figcaption>05 / Human review</figcaption></figure>
+      <figure><a href="output/slides/slide-06.png"><img loading="lazy" src="output/slides/slide-06.png" alt="Slide 6: Batch request review"></a><figcaption>06 / Batch review</figcaption></figure>
+      <figure><a href="output/slides/slide-07.png"><img loading="lazy" src="output/slides/slide-07.png" alt="Slide 7: Synthetic evaluation and local Gemma results"></a><figcaption>07 / Evaluation</figcaption></figure>
+      <figure><a href="output/slides/slide-08.png"><img loading="lazy" src="output/slides/slide-08.png" alt="Slide 8: Original local startup demonstration"></a><figcaption>08 / Local startup</figcaption></figure>
+    </div>
+  </section>
+  <section class="note"><h2>Run it yourself.</h2><p>Download the repository, install dependencies with <code>uv sync --locked --python 3.12</code>, then run <code>uv run streamlit run app.py</code>. The offline classifier needs no API key. <a href="https://github.com/Skithrills/condo-request-classifier#quick-start-on-a-fresh-machine">Full setup instructions →</a></p></section>
+</main>
+<footer>Classifier-first research prototype · All examples are synthetic · Scores are not production benchmarks.<br><a href="https://github.com/Skithrills/condo-request-classifier">GitHub repository</a> · <a href="https://github.com/Skithrills/condo-request-classifier/archive/refs/heads/main.zip">Download source ZIP</a></footer>
+</body>
+</html>
