@@ -45,11 +45,13 @@ def baseline() -> BaselineBackend:
 
 with st.sidebar:
     st.html('<div class="brand">MANAGEMENT<br>AGENT</div>')
-    st.caption("Condominium operations · Phase 01")
+    st.caption("Resident request classification · Prototype")
     st.divider()
     backend_name = st.selectbox("Classification engine", ["Offline baseline", "Ollama"])
     threshold = st.slider("Review threshold", 0.0, 1.0, 0.60, 0.05)
-    st.caption("Scores below this threshold need review. Scores are not validated accuracy.")
+    st.caption(
+        "Results below this score are flagged for review. Scores are uncalibrated estimates."
+    )
     host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
     if backend_name == "Ollama":
@@ -60,11 +62,15 @@ with st.sidebar:
             "Ollama sends entered text to the configured server. All LLM results need staff review."
         )
     else:
-        st.caption("Runs locally on 140 synthetic examples. No API key or model download needed.")
+        st.caption(
+            "Trained on 140 synthetic examples. Runs locally without an API key or download."
+        )
     st.divider()
     st.markdown("**Current scope**")
     st.caption("Classify · Triage · Review")
-    st.caption("Ticketing, RAG and autonomous agents belong to later phases.")
+    st.caption(
+        "Staff review is the focus of this prototype. Operational integrations are future work."
+    )
 
 
 def service() -> Classifier:
@@ -87,11 +93,12 @@ if st.session_state.get("classification_settings") != active_settings:
     st.session_state["classification_settings"] = active_settings
 
 
-st.html('<div class="eyebrow">RESIDENT SERVICES / CLASSIFIER LAB</div>')
-st.title("Every request starts here.")
+st.html('<div class="eyebrow">MANAGEMENT AGENT / RESIDENT SERVICES</div>')
+st.title("Resident requests. Structured decisions.")
 st.html(
-    '<p class="intro">Turn a resident message into a category, priority and suggested team. '
-    "Inspect the result before it moves into an operational workflow.</p>"
+    '<p class="intro">Help property-management staff make sense of residents\' requests. '
+    "Each message becomes a category, priority and suggested team, "
+    "with clear reasons for review.</p>"
 )
 st.caption("10 categories  ·  English starter dataset  ·  Human review built in")
 single_tab, batch_tab, evaluation_tab, guide_tab, showcase_tab = st.tabs(
@@ -163,17 +170,17 @@ with single_tab:
         result = st.session_state.get("single_result")
         if not result:
             with st.container(border=True):
-                st.markdown("**Ready when you are.**")
+                st.markdown("**Start with a resident request.**")
                 st.write(
                     "Enter a resident request or choose an example "
-                    "to see its proposed category and priority."
+                    "to see its category, priority and suggested team."
                 )
                 st.caption("Ambiguous messages and urgent reports are flagged for staff review.")
         else:
             with st.container(border=True):
                 if result["priority"] == "emergency":
                     st.error(
-                        "Possible emergency - contact on-site security or emergency services now. "
+                        "Possible emergency. Contact on-site security or emergency services now. "
                         "This app does not dispatch help."
                     )
                 elif result["review_required"]:
@@ -220,7 +227,7 @@ with single_tab:
             )
 
 with batch_tab:
-    st.subheader("Review a small inbox")
+    st.subheader("Classify requests together")
     st.write("Upload a UTF-8 CSV with a `text` column. Optional columns: `channel`, `location`.")
     st.caption("Up to 100 requests and 2 MB. Each row is checked independently.")
     st.download_button(
@@ -270,7 +277,7 @@ with batch_tab:
             st.error(str(exc))
 
 with evaluation_tab:
-    st.subheader("Measure before expanding")
+    st.subheader("Evaluate the classifier")
     st.write(
         "Evaluate the offline baseline on 55 held-out synthetic requests, "
         "including five emergencies."
@@ -318,8 +325,10 @@ with evaluation_tab:
         )
 
 with guide_tab:
-    st.subheader("One shared set of labels")
-    st.write("Use these definitions when collecting and labelling real requests.")
+    st.subheader("Understand the request categories")
+    st.write(
+        "Use these definitions to classify requests consistently and prepare labelled examples."
+    )
     for key, label in LABELS.items():
         with st.expander(f"{label.name} · {label.team}"):
             st.write(label.description)
@@ -333,8 +342,8 @@ with guide_tab:
 with showcase_tab:
     st.subheader("Project showcase")
     st.write(
-        "This website uses the classifier in this project for every submitted request. "
-        "Choose the offline model or Ollama in the sidebar, then review the suggested result."
+        "Explore the project through presentation slides and a narrated walkthrough. "
+        "To try it yourself, open Classify a request and choose an engine in the sidebar."
     )
     slide_folder = ROOT / "output/slides"
     slide_images = sorted(slide_folder.glob("slide-[0-9][0-9].png"))
@@ -367,7 +376,9 @@ with showcase_tab:
             )
     st.subheader("Start the project on Windows")
     st.write(
-        "Double-click start_project.cmd in the project folder to start the website and Ollama."
+        "After installing dependencies and Ollama, double-click start_project.cmd "
+        "in the project folder to start both services. For the offline classifier, "
+        "follow the setup instructions below."
     )
     st.code(".\\start_project.cmd", language="powershell")
     st.write(
@@ -378,7 +389,7 @@ with showcase_tab:
     with st.expander("Offline startup and first-time setup"):
         st.code(
             "# First-time dependency setup, if .venv is missing\n"
-            "uv sync --locked\n\n"
+            "uv sync --locked --python 3.12\n\n"
             "# Start the website without starting Ollama\n"
             ".\\start_project.cmd -SkipOllama",
             language="powershell",
