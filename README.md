@@ -1,15 +1,19 @@
-# Management Agent - resident request classifier
+# Management Agent: Resident Request Classifier
 
-A runnable first phase for a condominium property-management project. A resident
-message becomes a **category, priority, suggested team and review decision**.
-It runs immediately with a small offline classifier, and includes an Ollama adapter
-for experimenting with open-weight language models.
+A working prototype for organising condominium residents' requests. Each message
+is classified into a **category, priority, suggested team and review decision**
+to help staff assess what needs attention.
 
-## View the showcase - no installation
+Start with the included offline classifier, or use Ollama to explore local
+language-model inference. The project focuses on classification and staff review
+as the foundation for a future property-management platform.
+
+## Explore the project
 
 **[Open the online showcase](https://skithrills.github.io/condo-request-classifier/)**
-for the two hero images, narrated video and all eight slides. It works on another
-computer or phone without the original development PC.
+to watch the narrated walkthrough, browse the eight presentation slides and view
+the project overview and architecture images. Everything is available in your
+browser on a computer or phone.
 
 ![Condominium request classifier showcase](output/hero/01-classifier-showcase.png)
 
