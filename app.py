@@ -173,7 +173,7 @@ with single_tab:
             with st.container(border=True):
                 if result["priority"] == "emergency":
                     st.error(
-                        "Possible emergency — contact on-site security or emergency services now. "
+                        "Possible emergency - contact on-site security or emergency services now. "
                         "This app does not dispatch help."
                     )
                 elif result["review_required"]:
@@ -184,7 +184,7 @@ with single_tab:
                 a, b = st.columns(2)
                 a.metric("Priority", result["priority"].title())
                 score = result["confidence"]
-                b.metric("Model score", f"{score:.0%}" if score is not None else "—")
+                b.metric("Model score", f"{score:.0%}" if score is not None else "N/A")
                 st.write(f"**Suggested team:** {result['suggested_team']}")
                 st.write(f"**Location:** {result['location'] or 'Not provided'}")
                 for reason in result["review_reasons"]:

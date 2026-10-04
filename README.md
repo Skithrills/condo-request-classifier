@@ -1,11 +1,11 @@
-# Management Agent — resident request classifier
+# Management Agent - resident request classifier
 
 A runnable first phase for a condominium property-management project. A resident
 message becomes a **category, priority, suggested team and review decision**.
 It runs immediately with a small offline classifier, and includes an Ollama adapter
 for experimenting with open-weight language models.
 
-## View the showcase — no installation
+## View the showcase - no installation
 
 **[Open the online showcase](https://skithrills.github.io/condo-request-classifier/)**
 for the two hero images, narrated video and all eight slides. It works on another
@@ -295,7 +295,7 @@ Tests cover schemas, review rules, negated/hypothetical emergency phrases,
 provider failures, retry limits, CSV handling, Streamlit interactions, and a real
 LangChain HTTP round trip against a **simulated** Ollama endpoint.
 
-### Live local Ollama verification — 2026-10-03
+### Live local Ollama verification - 2026-10-03
 
 Ollama **0.35.0** was installed and tested entirely through the terminal/API, using
 **`gemma3:4b` (4.3B parameters, Q4_K_M)** on an NVIDIA RTX 3080 with 10 GB VRAM.
