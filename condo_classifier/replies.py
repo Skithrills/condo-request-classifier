@@ -5,12 +5,15 @@ from condo_classifier.taxonomy import LABELS
 
 WELCOME = (
     "Hi! I'm the management office assistant.\n\n"
-    "Describe your request in one message, including your block, unit or the shared "
-    'area involved. For example: "The corridor light outside #05-12 keeps flickering."\n\n'
+    "Tell me what you need, including your block, unit or the shared area involved. "
+    'For example: "The corridor light outside #05-12 keeps flickering."\n\n'
     "I sort requests for the right team. I can't approve, book or pay for anything, "
     "and staff confirm every request.\n\n"
+    "Send /new to start a separate request.\n\n"
     "If anyone is in danger, call your local emergency number first."
 )
+
+NEW_REQUEST = "Okay, starting a new request. What do you need help with?"
 
 TEXT_ONLY = "Please describe your request in a text message. I can't read photos or files yet."
 
