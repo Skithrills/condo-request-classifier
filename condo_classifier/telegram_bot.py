@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from condo_classifier.backends import ROOT, BaselineBackend, OllamaBackend
+from condo_classifier.backends import ROOT, backend_from_name
 from condo_classifier.replies import INVALID, TEXT_ONLY, UNAVAILABLE, WELCOME, resident_reply
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
@@ -72,9 +72,10 @@ def main() -> None:
     if not token:
         raise SystemExit("Set TELEGRAM_BOT_TOKEN in .env (create a bot with @BotFather).")
     backend_name = os.getenv("CLASSIFIER_BACKEND", "baseline")
-    if backend_name not in {"baseline", "ollama"}:
-        raise SystemExit("CLASSIFIER_BACKEND must be baseline or ollama.")
-    backend = BaselineBackend() if backend_name == "baseline" else OllamaBackend.from_env()
+    try:
+        backend = backend_from_name(backend_name)
+    except ValueError as exc:
+        raise SystemExit(f"CLASSIFIER_BACKEND: {exc}") from exc
     bot = ResidentBot(Classifier(backend))
     log.info("Starting Telegram bot with the %s backend", backend_name)
     bot.application(token).run_polling(allowed_updates=Update.ALL_TYPES)

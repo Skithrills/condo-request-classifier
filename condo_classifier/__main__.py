@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from condo_classifier.backends import ROOT, BaselineBackend, OllamaBackend
+from condo_classifier.backends import BACKENDS, ROOT, backend_from_name
 from condo_classifier.evaluation import evaluate, save_report
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
@@ -14,7 +14,7 @@ from condo_classifier.service import Classifier
 def main() -> int:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Condominium resident request classifier")
-    parser.add_argument("--backend", choices=["baseline", "ollama"], default="baseline")
+    parser.add_argument("--backend", choices=BACKENDS, default="baseline")
     sub = parser.add_subparsers(dest="command", required=True)
     classify = sub.add_parser("classify")
     classify.add_argument("text")
@@ -23,8 +23,7 @@ def main() -> int:
     evaluation.add_argument("--output", type=Path, default=Path("reports/baseline-evaluation.json"))
     args = parser.parse_args()
     try:
-        backend = BaselineBackend() if args.backend == "baseline" else OllamaBackend.from_env()
-        service = Classifier(backend)
+        service = Classifier(backend_from_name(args.backend))
         if args.command == "classify":
             result = service.classify(ResidentRequest(text=args.text, location=args.location))
             print(result.model_dump_json(indent=2))

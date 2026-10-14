@@ -5,6 +5,7 @@ description = "A classifier-first foundation for condominium resident service re
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "langchain-ollama>=1.0,<2",
+    "anthropic>=1,<2",
     "langgraph>=1.0,<2",
     "pydantic>=2.10,<3",
     "python-dotenv>=1.0,<2",

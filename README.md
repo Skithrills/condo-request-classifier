@@ -247,6 +247,23 @@ Sources: [structured outputs](https://console.groq.com/docs/structured-outputs),
 [rate limits](https://console.groq.com/docs/rate-limits),
 [data controls](https://console.groq.com/docs/your-data).
 
+## Try Claude (Anthropic API)
+
+The `claude` backend calls Claude Haiku 5.5 by default through the Anthropic API.
+Responses are constrained to the same `ModelDecision` schema with structured
+outputs, then checked for verbatim evidence and location spans. Like Ollama, its
+confidence is a self-estimate, so every Claude classification goes to staff review.
+
+Set `ANTHROPIC_API_KEY` in `.env` (see `.env.example`), then:
+
+```sh
+uv run python -m condo_classifier --backend claude classify "The lobby light is broken"
+```
+
+For the Telegram bot, set `CLASSIFIER_BACKEND=claude`. `CLAUDE_MODEL` and
+`CLAUDE_EFFORT` (default `low`) can be changed in `.env`. Each request is billed
+to your Anthropic account; a short classification costs a fraction of a cent.
+
 ## Telegram bot (resident side, early)
 
 A starter bot lets residents message the classifier on Telegram. It replies with
@@ -255,7 +272,7 @@ scores or review notes. It does not store requests or notify staff yet.
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
 2. Put `TELEGRAM_BOT_TOKEN=...` in `.env` (see `.env.example`). Optionally set
-   `CLASSIFIER_BACKEND=ollama` to use the local Ollama model instead of the
+   `CLASSIFIER_BACKEND=ollama` or `CLASSIFIER_BACKEND=claude` instead of the
    offline baseline.
 3. Run it:
 
