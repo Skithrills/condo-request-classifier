@@ -12,7 +12,8 @@ import time
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
-from telegram import Update
+from telegram import Bot, Update, User
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from condo_classifier.backends import ROOT, backend_from_name
@@ -27,14 +28,21 @@ from condo_classifier.replies import (
 )
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
+from condo_classifier.staff import new_request_id, resident_label, staff_card
 
 log = logging.getLogger(__name__)
 
 
 class ResidentBot:
-    def __init__(self, classifier: Classifier, chat: ResidentChat | None = None):
+    def __init__(
+        self,
+        classifier: Classifier,
+        chat: ResidentChat | None = None,
+        staff_chat_id: int | None = None,
+    ):
         self.classifier = classifier
         self.chat = chat
+        self.staff_chat_id = staff_chat_id
         self.conversations: dict[int, Conversation] = {}
         self.locks: dict[int, asyncio.Lock] = {}
 
@@ -56,6 +64,7 @@ class ResidentBot:
         # Classify the whole conversation so details sent later fill in what was missing.
         request = ResidentRequest(text=conversation.request_text(), channel="Telegram")
         result = self.classifier.classify(request)
+        conversation.last_result = result
         log.info(
             "classified category=%s priority=%s status=%s",
             result.category,
@@ -76,6 +85,41 @@ class ResidentBot:
             ]
         return reply
 
+    async def notify_staff(self, bot: Bot, chat_id: int, user: User) -> None:
+        """Post or update this request's card in the staff chat. Never blocks the resident."""
+        conversation = self.conversations.get(chat_id)
+        if self.staff_chat_id is None or conversation is None:
+            return
+        result = conversation.last_result
+        if result is None:
+            return
+        conversation.request_id = conversation.request_id or new_request_id()
+        card = staff_card(
+            conversation.request_id,
+            resident_label(user.full_name, user.username, user.id),
+            result,
+            conversation.resident_texts,
+        )
+        # A first emergency gets a fresh message so it notifies; otherwise edit the card.
+        urgent = result.status == "safety_escalation" and not conversation.staff_alerted
+        try:
+            if conversation.staff_message_id is not None and not urgent:
+                try:
+                    await bot.edit_message_text(
+                        card, chat_id=self.staff_chat_id, message_id=conversation.staff_message_id
+                    )
+                    return
+                except BadRequest as exc:
+                    if "not modified" in str(exc).lower():
+                        return
+                    # The card was deleted or is too old to edit: post a new one.
+            sent = await bot.send_message(self.staff_chat_id, card)
+            conversation.staff_message_id = sent.message_id
+            conversation.staff_alerted = conversation.staff_alerted or urgent
+            log.info("Staff card %s posted", conversation.request_id)
+        except TelegramError as exc:
+            log.warning("Could not post to the staff chat: %s", type(exc).__name__)
+
     def lock(self, chat_id: int) -> asyncio.Lock:
         return self.locks.setdefault(chat_id, asyncio.Lock())
 
@@ -93,23 +137,40 @@ class ResidentBot:
         # One message at a time per chat so the conversation history stays in order.
         async with self.lock(chat_id):
             await context.bot.send_chat_action(chat_id, "typing")
+            conversation = self.conversations.get(chat_id)
+            previous = conversation.last_result if conversation else None
             try:
                 # The classifier and Claude client are synchronous.
                 reply = await asyncio.to_thread(self.reply_for, chat_id, message.text)
             except Exception:
                 log.exception("Reply failed")
                 reply = UNAVAILABLE
-        await message.reply_text(reply)
+            await message.reply_text(reply)
+            conversation = self.conversations.get(chat_id)
+            if conversation and conversation.last_result is not previous:
+                await self.notify_staff(context.bot, chat_id, update.effective_user)
 
     async def other(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(TEXT_ONLY)
 
+    async def chat_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Setup helper: send /chatid in the staff group or channel to get STAFF_CHAT_ID."""
+        await update.effective_message.reply_text(
+            f"This chat's ID is {update.effective_chat.id}. "
+            "Put it in .env as STAFF_CHAT_ID to send resident requests here."
+        )
+
     def application(self, token: str) -> Application:
         app = Application.builder().token(token).build()
-        app.add_handler(CommandHandler(["start", "help"], self.start))
-        app.add_handler(CommandHandler("new", self.new))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.text))
-        app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, self.other))
+        # Residents only talk to the bot in private chats; groups are for staff.
+        private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
+        app.add_handler(CommandHandler(["start", "help"], self.start, filters=private))
+        app.add_handler(CommandHandler("new", self.new, filters=private))
+        app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, self.text))
+        app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
+        # CommandHandler ignores channel posts, so match /chatid as text to cover channels.
+        chat_id_command = filters.Regex(r"^/chatid(@\w+)?$") & ~filters.UpdateType.EDITED
+        app.add_handler(MessageHandler(chat_id_command, self.chat_id))
         return app
 
 
@@ -130,8 +191,18 @@ def build_bot() -> ResidentBot:
         chat = ResidentChat.from_env() if replies == "chat" else None
     except ValueError as exc:
         raise SystemExit(f"Check .env: {exc}") from exc
+    staff_chat_id = os.getenv("STAFF_CHAT_ID", "").strip()
+    if staff_chat_id and not staff_chat_id.lstrip("-").isdigit():
+        raise SystemExit(
+            "STAFF_CHAT_ID must be a number. Send /chatid in the staff chat to get it."
+        )
+    if not staff_chat_id:
+        log.warning(
+            "STAFF_CHAT_ID is not set, so requests are not sent to staff. "
+            "Add the bot to the staff group and send /chatid there to get the ID."
+        )
     log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
-    return ResidentBot(Classifier(backend), chat)
+    return ResidentBot(Classifier(backend), chat, int(staff_chat_id) if staff_chat_id else None)
 
 
 def main() -> None:

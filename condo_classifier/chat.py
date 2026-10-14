@@ -47,6 +47,11 @@ class Conversation:
     messages: list[dict] = field(default_factory=list)
     escalated: bool = False
     last_seen: float = field(default_factory=time.monotonic)
+    # Latest classification and the staff card that tracks this request.
+    last_result: Classification | None = None
+    request_id: str | None = None
+    staff_message_id: int | None = None
+    staff_alerted: bool = False
 
     def request_text(self) -> str:
         """Everything the resident has said, newest last, within the request size limit."""

@@ -271,9 +271,15 @@ classifier first, using everything the resident has said so far, so details sent
 later (like a unit number) fill in what was missing. Claude Haiku 5.5 then writes a
 short, natural reply from the classifier's notes and asks for anything still
 missing. Emergencies always get the fixed safety text, never generated wording. The
-bot cannot approve, book or pay for anything, and it does not store requests or
-notify staff yet. Conversations live in memory and reset after 2 idle hours, on
-`/new`, or when the bot restarts.
+bot cannot approve, book or pay for anything. Conversations live in memory and
+reset after 2 idle hours, on `/new`, or when the bot restarts.
+
+Each request also appears in a staff Telegram group or channel as one card with
+the category, team, priority, location, missing details, review notes and the
+resident's messages. The card is edited in place as the resident adds details, so
+the group is not flooded. A new request (after `/new`) gets a new card, and an
+emergency posts a fresh 🚨 message so it notifies everyone. The bot only answers
+residents in private chats and ignores other messages in the staff group.
 
 **Run it locally**
 
@@ -285,10 +291,22 @@ notify staff yet. Conversations live in memory and reset after 2 idle hours, on
    into it, save, and run the launcher again.
 4. Message your bot on Telegram. Stop it with **Ctrl+C**.
 
+**Connect the staff group**
+
+1. Create a Telegram group for staff (or a channel) and add your bot. In a
+   channel, make the bot an admin that can post messages.
+2. With the bot running, send `/chatid` in that group or channel.
+3. Paste the number into `.env` as `STAFF_CHAT_ID` (group IDs start with `-`)
+   and restart the bot.
+
+Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
+that requests are not reaching staff.
+
 `.env` is gitignored, so your keys stay on your machine. Useful settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
 | `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
