@@ -247,6 +247,26 @@ Sources: [structured outputs](https://console.groq.com/docs/structured-outputs),
 [rate limits](https://console.groq.com/docs/rate-limits),
 [data controls](https://console.groq.com/docs/your-data).
 
+## Telegram bot (resident side, early)
+
+A starter bot lets residents message the classifier on Telegram. It replies with
+the category, suggested team and any missing details, and never shows internal
+scores or review notes. It does not store requests or notify staff yet.
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+2. Put `TELEGRAM_BOT_TOKEN=...` in `.env` (see `.env.example`). Optionally set
+   `CLASSIFIER_BACKEND=ollama` to use the local Ollama model instead of the
+   offline baseline.
+3. Run it:
+
+```sh
+uv sync --locked --extra telegram
+uv run --extra telegram python -m condo_classifier.telegram_bot
+```
+
+The bot uses long polling, so no public URL is needed. Message text is not logged.
+Reply wording lives in `condo_classifier/replies.py`.
+
 ## Command line and Python
 
 ```powershell
