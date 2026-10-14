@@ -76,14 +76,13 @@ def test_ready_request_shows_summary_and_submit(baseline, tmp_path):
     bot, store = make_bot(baseline, tmp_path)
     tg = fake_bot()
     first = send(bot, tg, "The corridor light keeps flickering")
-    assert buttons(first) == ["cancel", "human"]
-    assert last_reaction(tg) == "👍"
+    # No buttons while the bot is still asking for details.
+    assert buttons(first) == []
+    tg.set_message_reaction.assert_not_awaited()  # nothing to flag yet
     ready = send(bot, tg, "It's outside #05-12", message_id=110)
     assert buttons(ready) == ["submit", "cancel", "human"]
     assert "📋 Maintenance" in ready.args[0]
     assert last_reaction(tg) == "👌"
-    # The earlier reply's buttons are removed so only the latest are live.
-    tg.edit_message_reply_markup.assert_awaited_with(1, 101, reply_markup=None)
 
     request_id = bot.conversations[1].request_id
     _, reply = tap(bot, tg, f"submit:{request_id}")
@@ -110,6 +109,7 @@ def test_cancel_and_stale_buttons(baseline, tmp_path):
     bot, store = make_bot(baseline, tmp_path)
     tg = fake_bot()
     send(bot, tg, "Loud music from #08-21 every night")
+    assert bot.conversations[1].status == "ready"
     request_id = bot.conversations[1].request_id
     _, reply = tap(bot, tg, f"cancel:{request_id}")
     assert buttons(reply.call_args) == []
@@ -118,20 +118,46 @@ def test_cancel_and_stale_buttons(baseline, tmp_path):
     assert query.answer.call_args.args[0] == STALE
 
 
-def test_talk_to_a_person_pings_staff_and_keeps_chatting(baseline, tmp_path):
+def command(bot, tg, handler):
+    message = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=600)))
+    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
+    asyncio.run(handler(update, SimpleNamespace(bot=tg)))
+    return message.reply_text.call_args.args[0]
+
+
+def test_human_command_pings_staff_and_keeps_chatting(baseline, tmp_path):
     bot, store = make_bot(baseline, tmp_path)
     tg = fake_bot()
-    send(bot, tg, "Loud music from #08-21 every night")
+    send(bot, tg, "The corridor light keeps flickering")
     request_id = bot.conversations[1].request_id
-    _, reply = tap(bot, tg, f"human:{request_id}")
-    assert "human" not in buttons(reply.call_args)
+    assert request_id in command(bot, tg, bot.human)
     assert store.get(request_id).status == "needs_human"
     assert tg.send_message.await_count == 2  # fresh card so staff get notified
     assert tg.send_message.call_args.args[1].startswith("🙋 Resident wants a person")
     assert last_reaction(tg) == "🙏"
-    later = send(bot, tg, "It started at 10pm", message_id=120)
-    assert "human" not in buttons(later)
+    later = send(bot, tg, "It's outside #05-12", message_id=120)
+    assert buttons(later) == []
     assert store.get(request_id).status == "needs_human"
+    assert "already" in command(bot, tg, bot.human)
+
+
+def test_human_command_before_any_request(baseline, tmp_path):
+    bot, store = make_bot(baseline, tmp_path)
+    tg = fake_bot()
+    assert "first" in command(bot, tg, bot.human)
+    assert store.all() == []
+
+
+def test_talk_to_a_person_button_on_ready_request(baseline, tmp_path):
+    bot, store = make_bot(baseline, tmp_path)
+    tg = fake_bot()
+    ready = send(bot, tg, "Loud music from #08-21 every night")
+    assert buttons(ready) == ["submit", "cancel", "human"]
+    request_id = bot.conversations[1].request_id
+    _, reply = tap(bot, tg, f"human:{request_id}")
+    assert buttons(reply.call_args) == []
+    assert store.get(request_id).status == "needs_human"
+    tg.edit_message_reply_markup.assert_awaited_with(1, 101, reply_markup=None)
 
 
 def test_emergency_has_no_buttons(baseline, tmp_path):

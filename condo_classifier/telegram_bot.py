@@ -13,7 +13,7 @@ import time
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
@@ -35,6 +35,8 @@ from condo_classifier.chat import (
 from condo_classifier.replies import (
     CANCELLED,
     HUMAN,
+    HUMAN_ALREADY,
+    HUMAN_FIRST,
     INVALID,
     NEW_REQUEST,
     NOT_READY,
@@ -54,13 +56,10 @@ from condo_classifier.store import RequestRecord, RequestStore, default_store_pa
 
 log = logging.getLogger(__name__)
 
-# Reactions on the resident's message show what the bot is doing at a glance.
+# Reactions mark only status changes worth noticing; the typing indicator covers the rest.
 REACTIONS = {
-    "received": ReactionEmoji.EYES,
-    "open": ReactionEmoji.THUMBS_UP,
     "ready": ReactionEmoji.OK_HAND_SIGN,
     "submitted": ReactionEmoji.SALUTING_FACE,
-    "cancelled": ReactionEmoji.THUMBS_UP,
     "needs_human": ReactionEmoji.PERSON_WITH_FOLDED_HANDS,
     "emergency": ReactionEmoji.FACE_SCREAMING_IN_FEAR,
     "problem": ReactionEmoji.THINKING_FACE,
@@ -162,27 +161,23 @@ class ResidentBot:
             log.exception("Could not save request %s", conversation.request_id)
 
     def keyboard(self, conversation: Conversation) -> InlineKeyboardMarkup | None:
+        """Buttons only once the work order is complete, so they never look like a choice the
+        resident must make while the bot is still asking a question. /human covers the rest."""
         request_id = conversation.request_id
-        if request_id is None or conversation.status in {"emergency", "submitted", "cancelled"}:
+        if request_id is None or conversation.status != "ready":
             return None
-        rows = []
-        if conversation.status == "ready":
-            rows.append(
+        return InlineKeyboardMarkup(
+            [
                 [
                     InlineKeyboardButton("✅ Submit", callback_data=f"submit:{request_id}"),
                     InlineKeyboardButton("✖️ Cancel", callback_data=f"cancel:{request_id}"),
-                ]
-            )
-        else:
-            rows.append([InlineKeyboardButton("✖️ Cancel", callback_data=f"cancel:{request_id}")])
-        if not conversation.human_requested:
-            rows.append(
-                [InlineKeyboardButton("🙋 Talk to a person", callback_data=f"human:{request_id}")]
-            )
-        return InlineKeyboardMarkup(rows)
+                ],
+                [InlineKeyboardButton("🙋 Talk to a person", callback_data=f"human:{request_id}")],
+            ]
+        )
 
     async def react(self, bot: Bot, chat_id: int, message_id: int | None, state: str) -> None:
-        if message_id is None:
+        if message_id is None or state not in REACTIONS:
             return
         try:
             await bot.set_message_reaction(chat_id, message_id, REACTIONS[state])
@@ -253,10 +248,8 @@ class ResidentBot:
             canned = quick_reply(message.text, existing is None or not existing.resident_texts)
             if canned:
                 # Greetings, and "thanks" after a submitted request, don't open a request.
-                await self.react(bot, chat_id, message.message_id, "open")
                 await message.reply_text(canned)
                 return
-            await self.react(bot, chat_id, message.message_id, "received")
             await bot.send_chat_action(chat_id, "typing")
             conversation = self.conversation(chat_id)
             user = update.effective_user
@@ -299,29 +292,45 @@ class ResidentBot:
                 await query.answer(NOT_READY)
                 return
             await query.answer()
-            if action == "submit":
-                conversation.status = "submitted"
-                reply = SUBMITTED.format(request_id=request_id)
-            elif action == "cancel":
-                conversation.status = "cancelled"
-                reply = CANCELLED
-            elif action == "human":
-                conversation.status = "needs_human"
-                conversation.human_requested = True
-                reply = HUMAN.format(request_id=request_id)
-            else:
+            await self.apply(bot, chat_id, conversation, action, query.message.reply_text)
+
+    async def apply(self, bot: Bot, chat_id: int, conversation: Conversation, action, send):
+        """Submit, cancel or hand a request to a person, from a button or /human."""
+        request_id = conversation.request_id
+        if action == "submit":
+            conversation.status = "submitted"
+            reply = SUBMITTED.format(request_id=request_id)
+        elif action == "cancel":
+            conversation.status = "cancelled"
+            reply = CANCELLED
+        elif action == "human":
+            conversation.status = "needs_human"
+            conversation.human_requested = True
+            reply = HUMAN.format(request_id=request_id)
+        else:
+            return
+        log.info("Resident chose %s for %s", action, request_id)
+        self.save(chat_id, conversation)
+        await self.clear_buttons(bot, chat_id, conversation)
+        await send(reply)
+        await self.react(bot, chat_id, conversation.last_resident_message_id, conversation.status)
+        # Asking for a person posts a fresh card so it notifies staff.
+        await self.notify_staff(bot, conversation, fresh=action == "human")
+        if action in {"submit", "cancel"}:
+            self.conversations.pop(chat_id, None)
+
+    async def human(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        message = update.effective_message
+        async with self.lock(chat_id):
+            conversation = self.conversations.get(chat_id)
+            if conversation is None or conversation.last_result is None:
+                await message.reply_text(HUMAN_FIRST)
                 return
-            log.info("Resident chose %s for %s", action, request_id)
-            self.save(chat_id, conversation)
-            await self.clear_buttons(bot, chat_id, conversation)
-            await query.message.reply_text(reply, reply_markup=self.keyboard(conversation))
-            await self.react(
-                bot, chat_id, conversation.last_resident_message_id, conversation.status
-            )
-            # Asking for a person posts a fresh card so it notifies staff.
-            await self.notify_staff(bot, conversation, fresh=action == "human")
-            if action in {"submit", "cancel"}:
-                self.conversations.pop(chat_id, None)
+            if conversation.human_requested:
+                await message.reply_text(HUMAN_ALREADY)
+                return
+            await self.apply(context.bot, chat_id, conversation, "human", message.reply_text)
 
     async def other(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(TEXT_ONLY)
@@ -333,12 +342,26 @@ class ResidentBot:
             "Put it in .env as STAFF_CHAT_ID to send resident requests here."
         )
 
+    @staticmethod
+    async def set_commands(app: Application) -> None:
+        """Show /new and /human in Telegram's command menu."""
+        try:
+            await app.bot.set_my_commands(
+                [
+                    BotCommand("new", "Start a new request"),
+                    BotCommand("human", "Talk to a staff member"),
+                ]
+            )
+        except TelegramError as exc:
+            log.warning("Could not set the command menu: %s", type(exc).__name__)
+
     def application(self, token: str) -> Application:
-        app = Application.builder().token(token).build()
+        app = Application.builder().token(token).post_init(self.set_commands).build()
         # Residents only talk to the bot in private chats; groups are for staff.
         private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
         app.add_handler(CommandHandler(["start", "help"], self.start, filters=private))
         app.add_handler(CommandHandler("new", self.new, filters=private))
+        app.add_handler(CommandHandler(["human", "person"], self.human, filters=private))
         app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, self.text))
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         app.add_handler(CallbackQueryHandler(self.button, pattern=r"^(submit|cancel|human):"))

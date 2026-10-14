@@ -275,14 +275,15 @@ Emergencies always get the fixed safety text, never generated wording. The bot
 cannot approve, book or pay for anything. Greetings and a closing "thanks" get a
 quick canned reply and never open a request.
 
-**Buttons.** Replies carry Telegram buttons. Once a request has everything it needs,
-the bot shows a 📋 work-order summary with **✅ Submit** and **✖️ Cancel**. **🙋 Talk to
-a person** is always available and pings staff with a fresh card. Submitting or
-cancelling closes the request; the next message starts a new one.
+**Buttons.** While the bot is still asking for details there are no buttons. Once a
+request has everything it needs, the bot shows a 📋 work-order summary with
+**✅ Submit**, **✖️ Cancel** and **🙋 Talk to a person**. Residents can also send
+`/human` at any time to get a staff member, which pings staff with a fresh card.
+Submitting or cancelling closes the request; the next message starts a new one.
 
-**Reactions.** The bot reacts to each resident message so you can see its state at a
-glance: 👀 received · 👍 replied · 👌 ready to submit · 🫡 submitted · 🙏 wants a person ·
-😱 emergency · 🤔 couldn't understand or something failed.
+**Reactions.** The bot reacts only when a request changes state: 👌 ready to submit ·
+🫡 submitted · 🙏 wants a person · 😱 emergency · 🤔 couldn't understand or something
+failed.
 
 Each request also appears in a staff Telegram group or channel as one card with
 the status, category, team, priority, location, missing details, review notes and the

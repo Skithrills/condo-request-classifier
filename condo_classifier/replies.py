@@ -11,7 +11,7 @@ WELCOME = (
     'For example: "The corridor light outside #05-12 keeps flickering."\n\n'
     "I sort requests for the right team. I can't approve, book or pay for anything, "
     "and staff confirm every request.\n\n"
-    "Send /new to start a separate request.\n\n"
+    "Send /new to start a separate request, or /human to reach a staff member.\n\n"
     "If anyone is in danger, call your local emergency number first."
 )
 
@@ -60,6 +60,10 @@ HUMAN = (
 )
 
 STALE = "This request is already closed."
+
+HUMAN_FIRST = "Tell me briefly what it's about first, then send /human and I'll get a staff member."
+
+HUMAN_ALREADY = "A staff member has already been asked to take over. They'll contact you."
 
 CLOSING = "Anytime! 👋 Message me whenever you need something."
 
