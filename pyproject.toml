@@ -5,12 +5,16 @@ description = "A classifier-first foundation for condominium resident service re
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "langchain-ollama>=1.0,<2",
+    "anthropic>=1,<2",
     "langgraph>=1.0,<2",
     "pydantic>=2.10,<3",
     "python-dotenv>=1.0,<2",
     "scikit-learn>=1.6,<2",
     "streamlit>=1.50,<2",
 ]
+
+[project.optional-dependencies]
+telegram = ["python-telegram-bot>=22.5,<23"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

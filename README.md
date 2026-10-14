@@ -247,6 +247,73 @@ Sources: [structured outputs](https://console.groq.com/docs/structured-outputs),
 [rate limits](https://console.groq.com/docs/rate-limits),
 [data controls](https://console.groq.com/docs/your-data).
 
+## Try Claude (Anthropic API)
+
+The `claude` backend calls Claude Haiku 5.5 by default through the Anthropic API.
+Responses are constrained to the same `ModelDecision` schema with structured
+outputs, then checked for verbatim evidence and location spans. Like Ollama, its
+confidence is a self-estimate, so every Claude classification goes to staff review.
+
+Set `ANTHROPIC_API_KEY` in `.env` (see `.env.example`), then:
+
+```sh
+uv run python -m condo_classifier --backend claude classify "The lobby light is broken"
+```
+
+For the Telegram bot, set `CLASSIFIER_BACKEND=claude`. `CLAUDE_MODEL` and
+`CLAUDE_EFFORT` (default `low`) can be changed in `.env`. Each request is billed
+to your Anthropic account; a short classification costs a fraction of a cent.
+
+## Telegram bot (resident side, early)
+
+Residents can chat with the bot on Telegram. Every message goes through the
+classifier first, using everything the resident has said so far, so details sent
+later (like a unit number) fill in what was missing. Claude Haiku 5.5 then writes a
+short, natural reply from the classifier's notes and asks for anything still
+missing. Emergencies always get the fixed safety text, never generated wording. The
+bot cannot approve, book or pay for anything. Conversations live in memory and
+reset after 2 idle hours, on `/new`, or when the bot restarts.
+
+Each request also appears in a staff Telegram group or channel as one card with
+the category, team, priority, location, missing details, review notes and the
+resident's messages. The card is edited in place as the resident adds details, so
+the group is not flooded. A new request (after `/new`) gets a new card, and an
+emergency posts a fresh 🚨 message so it notifies everyone. The bot only answers
+residents in private chats and ignores other messages in the staff group.
+
+**Run it locally**
+
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+2. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+   Create an API key at [platform.claude.com](https://platform.claude.com).
+3. Double-click **`run_bot.cmd`** on Windows, or run `./run_bot.sh` on macOS/Linux.
+   The first run creates `.env`; paste `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY`
+   into it, save, and run the launcher again.
+4. Message your bot on Telegram. Stop it with **Ctrl+C**.
+
+**Connect the staff group**
+
+1. Create a Telegram group for staff (or a channel) and add your bot. In a
+   channel, make the bot an admin that can post messages.
+2. With the bot running, send `/chatid` in that group or channel.
+3. Paste the number into `.env` as `STAFF_CHAT_ID` (group IDs start with `-`)
+   and restart the bot.
+
+Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
+that requests are not reaching staff.
+
+`.env` is gitignored, so your keys stay on your machine. Useful settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
+| `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
+| `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
+| `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
+
+Message text is never logged. Chat reply wording rules live in
+`condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`.
+
 ## Command line and Python
 
 ```powershell
