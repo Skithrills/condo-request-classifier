@@ -1,0 +1,113 @@
+"""SQLite record of resident requests, shared by the Telegram bot and the staff dashboard."""
+
+import json
+import os
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+STATUSES = ("open", "ready", "submitted", "needs_human", "emergency", "cancelled")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS requests (
+    id TEXT PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    resident TEXT NOT NULL,
+    status TEXT NOT NULL,
+    category TEXT NOT NULL,
+    priority TEXT NOT NULL,
+    team TEXT NOT NULL,
+    location TEXT,
+    missing_details TEXT NOT NULL,
+    review_reasons TEXT NOT NULL,
+    messages TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+@dataclass
+class RequestRecord:
+    id: str
+    chat_id: int
+    resident: str
+    status: str
+    category: str
+    priority: str
+    team: str
+    location: str | None
+    missing_details: list[str] = field(default_factory=list)
+    review_reasons: list[str] = field(default_factory=list)
+    messages: list[str] = field(default_factory=list)
+    created_at: str = field(default_factory=now)
+    updated_at: str = field(default_factory=now)
+
+
+LIST_FIELDS = ("missing_details", "review_reasons", "messages")
+
+
+class RequestStore:
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as db:
+            db.execute(SCHEMA)
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # A short-lived connection per call keeps this safe across threads and processes.
+        db = sqlite3.connect(self.path, timeout=10)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:  # commits on success, rolls back on error
+                yield db
+        finally:
+            db.close()
+
+    def save(self, record: RequestRecord) -> None:
+        if record.status not in STATUSES:
+            raise ValueError(f"Unknown status: {record.status}")
+        record.updated_at = now()
+        row = asdict(record)
+        for key in LIST_FIELDS:
+            row[key] = json.dumps(row[key], ensure_ascii=False)
+        columns = ", ".join(row)
+        placeholders = ", ".join(f":{key}" for key in row)
+        updates = ", ".join(f"{key} = excluded.{key}" for key in row if key != "created_at")
+        with self._connect() as db:
+            db.execute(
+                f"INSERT INTO requests ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(id) DO UPDATE SET {updates}",
+                row,
+            )
+
+    def get(self, request_id: str) -> RequestRecord | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM requests WHERE id = ?", (request_id,)).fetchone()
+        return self._record(row) if row else None
+
+    def all(self) -> list[RequestRecord]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM requests ORDER BY updated_at DESC").fetchall()
+        return [self._record(row) for row in rows]
+
+    @staticmethod
+    def _record(row: sqlite3.Row) -> RequestRecord:
+        data = dict(row)
+        for key in LIST_FIELDS:
+            data[key] = json.loads(data[key])
+        return RequestRecord(**data)
+
+
+def default_store_path() -> Path:
+    """REQUESTS_DB from .env, or data/private/requests.db (gitignored) in the project."""
+    root = Path(__file__).resolve().parents[1]
+    return Path(os.getenv("REQUESTS_DB") or root / "data" / "private" / "requests.db")

@@ -1,6 +1,8 @@
 """Resident-facing reply text. Kept free of Telegram imports so any chat channel can reuse it."""
 
-from condo_classifier.schema import Classification, Priority
+import re
+
+from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.taxonomy import LABELS
 
 WELCOME = (
@@ -26,30 +28,75 @@ UNAVAILABLE = (
 
 
 def resident_reply(result: Classification) -> str:
-    """Summarise a classification for the resident without internal scores or review notes."""
+    """Short template reply without internal scores or review notes. Used when Claude is off
+    or unavailable, and always for emergencies."""
     if result.status == "safety_escalation":
         return (
-            "This sounds urgent. If anyone is in danger, call your local emergency number "
-            "now and move to a safe place.\n\n"
-            "Your message has been marked as an emergency for building staff, but this chat "
-            "is not an emergency service."
+            "🚨 If anyone is in danger, call your local emergency number now. I've alerted "
+            "building staff, but this chat isn't an emergency service."
         )
     if result.status == "provider_error":
         return UNAVAILABLE
-    label = LABELS[result.category]
-    lines = [f"Thanks, your request has been sorted as: {label.name}."]
-    lines.append(f"Suggested team: {result.suggested_team}.")
-    if result.location:
-        lines.append(f"Location: {result.location}.")
+    if result.category == Category.OTHER:
+        return "Can you tell me a bit more about what you need?"
+    reply = f"Got it, this one's for {result.suggested_team}."
     if result.priority == Priority.HIGH:
-        lines.append("It has been marked as high priority.")
+        reply += " Marked high priority."
     if result.missing_details:
-        lines.append("")
-        lines.append("To help staff act faster, please reply with:")
-        lines.extend(f"- {detail}" for detail in result.missing_details)
-    lines.append("")
-    if result.review_required:
-        lines.append("A staff member will check it before anything is arranged.")
+        detail = result.missing_details[0]
+        reply += f" Can you share the {detail[0].lower()}{detail[1:]}?"
     else:
-        lines.append("Staff will follow up. Nothing has been approved or booked yet.")
+        reply += " Tap Submit below to send it to staff."
+    return reply
+
+
+SUBMITTED = "✅ Submitted as {request_id}. Staff will follow up. Send /new for anything else."
+
+CANCELLED = "Cancelled. Message me anytime if you need something."
+
+HUMAN = (
+    "🙋 I've asked a staff member to take over {request_id}. They'll contact you. "
+    "You can keep adding details here."
+)
+
+STALE = "This request is already closed."
+
+CLOSING = "Anytime! 👋 Message me whenever you need something."
+
+GREETING_REPLY = "Hi! 👋 What can I help with? Include your block or unit if it's about a place."
+
+GREETING = re.compile(
+    r"^\W*(?:hi+|hey+|hello+|hiya|yo|good (?:morning|afternoon|evening))(?: there)?\W*$", re.I
+)
+
+_PLEASANTRY_WORD = (
+    r"(?:ok(?:ay)?|k|cool|great|nice|noted|alright|got it|perfect|awesome|"
+    r"thanks?(?: you)?(?: so much| a lot)?|thx|ty|cheers|bye|goodbye|see ya)"
+)
+# One or more pleasantries, e.g. "ok thank you", "great, thanks!", "thx bye 👍".
+PLEASANTRY = re.compile(rf"^\W*{_PLEASANTRY_WORD}(?:[\W_]+{_PLEASANTRY_WORD})*\W*$", re.I)
+
+NOT_READY = "Add the missing details first."
+
+
+def work_order_summary(result: Classification) -> str:
+    """Compact work-order card shown above the Submit and Cancel buttons."""
+    parts = [LABELS[result.category].name]
+    if result.location:
+        parts.append(result.location)
+    lines = ["📋 " + " · ".join(parts), f"Team: {result.suggested_team}"]
+    if result.priority == Priority.HIGH:
+        lines.append("Priority: high")
     return "\n".join(lines)
+
+
+def quick_reply(text: str, fresh: bool) -> str | None:
+    """Canned answer for small talk that shouldn't start or change a request.
+
+    `fresh` means no request is in progress, so "thanks" is a goodbye, not a detail.
+    """
+    if GREETING.match(text):
+        return GREETING_REPLY
+    if fresh and PLEASANTRY.match(text):
+        return CLOSING
+    return None

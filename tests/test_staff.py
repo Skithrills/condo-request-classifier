@@ -75,12 +75,18 @@ def fake_bot():
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=7)),
         edit_message_text=AsyncMock(),
         send_chat_action=AsyncMock(),
+        set_message_reaction=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
     )
     return bot
 
 
 def run(bot, staff_bot, chat_id, text):
-    message = SimpleNamespace(text=text, reply_text=AsyncMock())
+    message = SimpleNamespace(
+        text=text,
+        message_id=100,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=200)),
+    )
     update = SimpleNamespace(
         effective_message=message,
         effective_chat=SimpleNamespace(id=chat_id),

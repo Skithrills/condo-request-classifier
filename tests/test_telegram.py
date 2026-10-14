@@ -28,12 +28,17 @@ def make_result(**changes):
     )
 
 
-def test_reply_names_category_team_and_location():
+def test_reply_is_short_and_names_team():
     reply = resident_reply(make_result())
-    assert "Maintenance" in reply
-    assert "Maintenance team" in reply
-    assert "#05-12" in reply
-    assert "approved" in reply
+    assert reply == (
+        "Got it, this one's for Maintenance team. Tap Submit below to send it to staff."
+    )
+    assert len(reply.split()) <= 30
+
+
+def test_unclear_request_asks_for_more():
+    reply = resident_reply(make_result(category=Category.OTHER))
+    assert reply == "Can you tell me a bit more about what you need?"
 
 
 def test_reply_hides_internal_review_reasons_and_scores():
@@ -48,14 +53,14 @@ def test_reply_hides_internal_review_reasons_and_scores():
     )
     assert "threshold" not in reply
     assert "0.41" not in reply
-    assert "- Block, unit or shared-area location" in reply
-    assert "staff member will check" in reply
+    assert reply.endswith("Can you share the block, unit or shared-area location?")
+    assert "Submit" not in reply
 
 
 def test_emergency_reply_points_to_emergency_services():
     reply = resident_reply(make_result(priority=Priority.EMERGENCY, status="safety_escalation"))
     assert "emergency number" in reply
-    assert "not an emergency service" in reply
+    assert "isn't an emergency service" in reply
 
 
 def test_provider_error_reply():
@@ -79,7 +84,7 @@ def test_fixed_replies_end_to_end(baseline):
 def test_later_messages_fill_in_missing_location(baseline):
     bot = bot_with(Classifier(baseline))
     first = bot.reply_for(1, "The light keeps flickering")
-    assert "Block, unit or shared-area location" in first
+    assert "block, unit or shared-area location" in first
     bot.reply_for(1, "It's outside #05-12")
     assert bot.conversations[1].request_text() == (
         "The light keeps flickering\nIt's outside #05-12"

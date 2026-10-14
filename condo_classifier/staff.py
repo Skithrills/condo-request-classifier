@@ -7,9 +7,13 @@ from condo_classifier.taxonomy import LABELS
 
 MAX_CARD_CHARS = 4000  # Telegram allows 4,096
 
-HEADERS = {
-    "safety_escalation": "🚨 EMERGENCY",
-    "provider_error": "⚠️ Could not classify",
+# Request statuses (see store.STATUSES) that override the classification-based header.
+STATUS_HEADERS = {
+    "emergency": "🚨 EMERGENCY",
+    "needs_human": "🙋 Resident wants a person",
+    "submitted": "✅ Work order submitted",
+    "cancelled": "✖️ Cancelled by resident",
+    "ready": "📝 Ready, waiting for resident",
 }
 
 
@@ -22,10 +26,15 @@ def staff_card(
     resident: str,
     result: Classification,
     resident_texts: list[str],
+    status: str = "open",
 ) -> str:
     """Summarise a resident request for the staff group. Scores stay out; reasons stay in."""
-    if result.status in HEADERS:
-        header = HEADERS[result.status]
+    if result.status == "safety_escalation":
+        header = STATUS_HEADERS["emergency"]
+    elif status in STATUS_HEADERS:
+        header = STATUS_HEADERS[status]
+    elif result.status == "provider_error":
+        header = "⚠️ Could not classify"
     elif result.priority == Priority.HIGH:
         header = "🔴 High priority"
     else:

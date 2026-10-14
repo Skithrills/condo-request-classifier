@@ -269,17 +269,29 @@ to your Anthropic account; a short classification costs a fraction of a cent.
 Residents can chat with the bot on Telegram. Every message goes through the
 classifier first, using everything the resident has said so far, so details sent
 later (like a unit number) fill in what was missing. Claude Haiku 5.5 then writes a
-short, natural reply from the classifier's notes and asks for anything still
-missing. Emergencies always get the fixed safety text, never generated wording. The
-bot cannot approve, book or pay for anything. Conversations live in memory and
-reset after 2 idle hours, on `/new`, or when the bot restarts.
+short reply from the classifier's notes. It only asks a question when the
+classifier says a detail is missing, so it stops asking once the request is complete.
+Emergencies always get the fixed safety text, never generated wording. The bot
+cannot approve, book or pay for anything. Greetings and a closing "thanks" get a
+quick canned reply and never open a request.
+
+**Buttons.** Replies carry Telegram buttons. Once a request has everything it needs,
+the bot shows a 📋 work-order summary with **✅ Submit** and **✖️ Cancel**. **🙋 Talk to
+a person** is always available and pings staff with a fresh card. Submitting or
+cancelling closes the request; the next message starts a new one.
+
+**Reactions.** The bot reacts to each resident message so you can see its state at a
+glance: 👀 received · 👍 replied · 👌 ready to submit · 🫡 submitted · 🙏 wants a person ·
+😱 emergency · 🤔 couldn't understand or something failed.
 
 Each request also appears in a staff Telegram group or channel as one card with
-the category, team, priority, location, missing details, review notes and the
-resident's messages. The card is edited in place as the resident adds details, so
-the group is not flooded. A new request (after `/new`) gets a new card, and an
-emergency posts a fresh 🚨 message so it notifies everyone. The bot only answers
-residents in private chats and ignores other messages in the staff group.
+the status, category, team, priority, location, missing details, review notes and the
+resident's messages. The card is edited in place as the resident adds details or taps
+a button, so the group is not flooded. An emergency or a request for a person posts a
+fresh message so it notifies everyone. Greetings and unclear chatter only reach staff
+once the request is understood. The bot only answers residents in private chats and
+ignores other messages in the staff group. Conversations live in memory and reset
+after 2 idle hours, on `/new`, or when the bot restarts.
 
 **Run it locally**
 
@@ -302,6 +314,23 @@ residents in private chats and ignores other messages in the staff group.
 Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
 that requests are not reaching staff.
 
+**Staff dashboard**
+
+Requests are saved to `data/private/requests.db` (gitignored; change it with
+`REQUESTS_DB`). With the bot running, double-click **`run_dashboard.cmd`** (or run
+`./run_dashboard.sh`) and open http://localhost:8502. It shows counts per status,
+filters, search and each request's details, and refreshes every 10 seconds. Run it on
+the same machine as the bot.
+
+**Try conversations without Telegram**
+
+```sh
+uv run --extra telegram python scripts/try_conversations.py
+```
+
+This runs three scripted resident chats through the real bot logic with Claude
+replies, prints each reply with its status and word count, and estimates the cost.
+
 `.env` is gitignored, so your keys stay on your machine. Useful settings:
 
 | Setting | Default | Meaning |
@@ -311,8 +340,9 @@ that requests are not reaching staff.
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
 
-Message text is never logged. Chat reply wording rules live in
-`condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`.
+Message text is never logged. Claude's system prompt (`SYSTEM`) lives in
+`condo_classifier/chat.py`; fixed replies and button texts live in
+`condo_classifier/replies.py`.
 
 ## Command line and Python
 
