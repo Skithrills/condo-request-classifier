@@ -20,7 +20,8 @@ browser on a computer or phone.
 | View or download | File |
 | --- | --- |
 | Video, approximately 79 seconds | [MP4](output/demo/Management_Agent_Classifier_Demo.mp4) |
-| Presentation | [PDF](output/slides/Management_Agent_Classifier_Showcase.pdf) · [Editable PowerPoint](output/slides/Management_Agent_Classifier_Showcase.pptx) |
+| Telegram bot deck (latest) | [PDF](output/slides/Condo_AI_Agent_Telegram_Bot.pdf) · [Editable PowerPoint](output/slides/Condo_AI_Agent_Telegram_Bot.pptx) |
+| Classifier showcase (earlier) | [PDF](output/slides/Management_Agent_Classifier_Showcase.pdf) · [Editable PowerPoint](output/slides/Management_Agent_Classifier_Showcase.pptx) |
 | Hero images | [Project showcase](output/hero/01-classifier-showcase.png) · [Classifier architecture](output/hero/02-classifier-architecture.png) |
 | Everything for presenting | [Release downloads](https://github.com/Skithrills/condo-request-classifier/releases/latest) |
 | Complete source and media | [Download ZIP](https://github.com/Skithrills/condo-request-classifier/archive/refs/heads/main.zip) |
