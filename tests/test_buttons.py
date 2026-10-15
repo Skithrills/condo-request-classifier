@@ -265,3 +265,20 @@ def test_ready_and_summary_helpers(baseline):
     assert not ready_to_submit(vague)
     assert ready_to_submit(located)
     assert work_order_summary(located).startswith("📋 Maintenance · #05-12")
+
+
+def test_deleted_requests_are_not_saved_again(baseline, tmp_path):
+    bot, store = make_bot(baseline, tmp_path)
+    tg = fake_bot()
+    send(bot, tg, "The corridor light keeps flickering")
+    request_id = bot.conversations[1].request_id
+    cards = tg.send_message.await_count
+    store.delete(request_id)  # staff delete it on the dashboard
+    send(bot, tg, "It's outside #05-12", message_id=160)
+    assert store.get(request_id) is None
+    assert tg.send_message.await_count == cards
+    tg.edit_message_text.assert_not_awaited()
+    # A fresh request after /new is tracked normally.
+    bot.conversations.pop(1)
+    send(bot, tg, "Loud music from #08-21 every night", message_id=170)
+    assert len(store.all()) == 1

@@ -120,6 +120,12 @@ def requests_view() -> None:
                     if photo.exists():
                         columns[index % len(columns)].image(str(photo))
             st.caption(f"Opened {when(r.created_at)} · updated {when(r.updated_at)}")
+            with st.popover("🗑️ Delete"):
+                st.write(f"Delete **{r.id}** and its photos? This can't be undone.")
+                if st.button("Yes, delete it", key=f"delete-{r.id}", type="primary"):
+                    store.delete(r.id)
+                    st.toast(f"Deleted {r.id}")
+                    st.rerun(scope="fragment")
 
 
 requests_view()

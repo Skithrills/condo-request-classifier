@@ -206,7 +206,7 @@ class ResidentBot:
     def worth_tracking(conversation: Conversation) -> bool:
         """Skip greetings and unclear chatter until the request is understood or escalated."""
         result = conversation.last_result
-        if result is None or conversation.request_id is None:
+        if result is None or conversation.request_id is None or conversation.deleted:
             return False
         return result.category.value != "other" or conversation.status != "open"
 
@@ -215,6 +215,14 @@ class ResidentBot:
         if self.store is None or not self.worth_tracking(conversation):
             return
         try:
+            if conversation.saved and self.store.get(conversation.request_id) is None:
+                # Staff deleted it on the dashboard; don't bring it back.
+                conversation.deleted = True
+                conversation.pending_photos.clear()
+                log.info(
+                    "Request %s was deleted by staff; not saving it again", conversation.request_id
+                )
+                return
             # Photos are written only once a request is worth tracking.
             while conversation.pending_photos:
                 jpeg = conversation.pending_photos.pop(0)
@@ -235,6 +243,7 @@ class ResidentBot:
                     photos=conversation.photos,
                 )
             )
+            conversation.saved = True
         except Exception:
             log.exception("Could not save request %s", conversation.request_id)
 

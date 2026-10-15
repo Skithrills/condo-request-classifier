@@ -285,3 +285,20 @@ def test_photo_problems_get_a_text_fallback(baseline, tmp_path):
     assert "can't look at photos" in send_photo(no_vision, tg)
     assert "describe the problem in text" in send_photo(bot, tg, data=b"garbage")
     assert store.all() == []
+
+
+def test_delete_removes_request_and_photos(tmp_path):
+    from condo_classifier.store import RequestRecord
+
+    store = RequestStore(tmp_path / "requests.db")
+    photo = store.save_photo("R-DEL1", b"jpeg")
+    record = RequestRecord(
+        "R-DEL1", 1, "Jane", "open", "noise", "normal", "Resident relations", None, photos=[photo]
+    )
+    store.save(record)
+    store.save(RequestRecord("R-KEEP", 1, "Alex", "open", "noise", "normal", "Team", None))
+    assert store.delete("R-DEL1") is True
+    assert store.get("R-DEL1") is None
+    assert not (tmp_path / "photos" / "R-DEL1").exists()
+    assert [r.id for r in store.all()] == ["R-KEEP"]
+    assert store.delete("R-DEL1") is False

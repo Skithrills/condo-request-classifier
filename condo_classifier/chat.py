@@ -74,6 +74,9 @@ class Conversation:
     pending_photos: list[bytes] = field(default_factory=list)
     photos: list[str] = field(default_factory=list)
     staff_photos_sent: int = 0
+    # Store bookkeeping: saved at least once, and whether staff have since deleted it.
+    saved: bool = False
+    deleted: bool = False
 
     def request_text(self) -> str:
         """Everything the resident has said, newest last, within the request size limit."""

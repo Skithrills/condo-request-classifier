@@ -344,8 +344,10 @@ when a person addresses it.
 Requests are saved to `data/private/requests.db` (gitignored; change it with
 `REQUESTS_DB`). With the bot running, double-click **`run_dashboard.cmd`** (or run
 `./run_dashboard.sh`) and open http://localhost:8502. It shows counts per status,
-filters, search and each request's details, and refreshes every 10 seconds. Run it on
-the same machine as the bot.
+filters, search and each request's details, and refreshes every 10 seconds. Each
+request has a 🗑️ **Delete** button (with a confirmation) that removes it and its
+photos; the bot won't save a deleted request again if that resident keeps chatting.
+Run it on the same machine as the bot.
 
 **Try conversations without Telegram**
 

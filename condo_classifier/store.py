@@ -77,6 +77,17 @@ class RequestStore:
         (folder / name).write_bytes(jpeg)
         return f"photos/{request_id}/{name}"
 
+    def delete(self, request_id: str) -> bool:
+        """Remove a request and its saved photos. Returns False if it didn't exist."""
+        with self._connect() as db:
+            deleted = db.execute("DELETE FROM requests WHERE id = ?", (request_id,)).rowcount
+        folder = self.path.parent / "photos" / request_id
+        if request_id.replace("-", "").isalnum() and folder.is_dir():
+            for photo in folder.iterdir():
+                photo.unlink()
+            folder.rmdir()
+        return bool(deleted)
+
     def photo_path(self, relative: str) -> Path:
         return self.path.parent / relative
 
