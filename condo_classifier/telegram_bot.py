@@ -366,7 +366,13 @@ class ResidentBot:
         """In groups, answer only messages that mention this bot or reply to it."""
         message = update.effective_message
         text = addressed_text(message, context.bot)
-        if text is None or not self.allow_reply(update.effective_chat.id, message.from_user):
+        sender = "a bot" if message.from_user and message.from_user.is_bot else "a person"
+        if text is None:
+            # Seeing this line proves Telegram delivers group messages to the bot.
+            log.info("Group message from %s ignored: not a mention or reply", sender)
+            return
+        log.info("Group message from %s addressed to me", sender)
+        if not self.allow_reply(update.effective_chat.id, message.from_user):
             return
         if message.photo or message.document:
             await self.handle_photo(update, context, text or None)
