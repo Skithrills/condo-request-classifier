@@ -362,6 +362,9 @@ photos one click away. Filters sit in the sidebar and the page refreshes every 1
 seconds (pause it with Live refresh while deleting). Tick rows in
 the table and press 🗑️ **Delete selected** (or use Delete inside a request's details);
 after a confirmation it removes the requests and their photos; the bot won't save a deleted request again if that resident keeps chatting.
+To move a request along, open its details and pick **Open**, **In progress** or
+**Done**, or tick rows in the table and use **Set status**. A resident's follow-up
+message won't undo it, but an emergency or a request for a person still takes over.
 Run it on the same machine as the bot.
 
 **Try conversations without Telegram**

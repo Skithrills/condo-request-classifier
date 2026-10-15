@@ -13,6 +13,7 @@ STATUS_HEADERS = {
     "emergency": "🚨 EMERGENCY",
     "needs_human": "🙋 Resident wants a person",
     "with_staff": "👤 With staff · reply to this card to message the resident, /done to finish",
+    "in_progress": "🔧 In progress",
     "resolved": "✔️ Resolved by staff",
     "submitted": "✅ Work order submitted",
     "cancelled": "✖️ Cancelled by resident",
@@ -22,7 +23,7 @@ STATUS_HEADERS = {
 
 # Statuses where the resident has confirmed the summary card or a staff member has the
 # request, so the model's uncertainty about the category no longer needs attention.
-CONFIRMED = {"submitted", "with_staff", "resolved"}
+CONFIRMED = {"submitted", "with_staff", "in_progress", "resolved"}
 RESIDENT_CONFIRMED = "✅ Resident confirmed the summary."
 
 
