@@ -139,7 +139,7 @@ def test_idle_conversation_resets(baseline, monkeypatch):
     [
         ({"BOT_REPLIES": "chat"}, "ANTHROPIC_API_KEY"),
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "claude"}, "ANTHROPIC_API_KEY"),
-        ({"BOT_REPLIES": "loud"}, "chat or fixed"),
+        ({"BOT_REPLIES": "loud"}, "claude, ollama or fixed"),
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "gpt"}, "Check .env"),
     ],
 )

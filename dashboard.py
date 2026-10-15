@@ -37,6 +37,7 @@ STATUS = {
     "ready": ("Awaiting resident", "clipboard-list", "#5925DC", "#EBE9FE"),
     "open": ("In conversation", "message-circle", "#475467", "#EEF1F4"),
     "resolved": ("Resolved", "circle-check", "#067647", "#DCFAE6"),
+    "answered": ("Answered by FAQ", "book-open", "#3E4784", "#EEF4FF"),
     "cancelled": ("Cancelled", "circle-x", "#667085", "#EEF1F4"),
 }
 # Most urgent first.
@@ -48,7 +49,7 @@ GROUPS = [
     ("New work orders", {"submitted"}, "#12917A"),
     ("With staff", {"with_staff"}, "#2E90FA"),
     ("With the bot", {"open", "ready"}, "#98A2B3"),
-    ("Resolved", {"resolved"}, "#A6D8BF"),
+    ("Resolved", {"resolved", "answered"}, "#A6D8BF"),
 ]
 CATEGORY_ICON = {
     "maintenance": "wrench",
@@ -233,7 +234,7 @@ def overview(records: list[RequestRecord]) -> str:
         "Submitted by residents",
         "Replying in Telegram",
         f"{count['ready']} waiting for Submit",
-        f"{resolved_today} today",
+        f"{resolved_today} today · {count['answered']} answered by FAQ",
     ]
     stats, segments = [], []
     for (label, statuses, colour), foot in zip(GROUPS, feet, strict=True):

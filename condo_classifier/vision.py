@@ -12,7 +12,11 @@ import os
 from typing import Protocol
 
 import anthropic
+import httpx
+import ollama
 from PIL import Image, ImageOps
+
+from condo_classifier.backends import check_ollama_host
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +116,65 @@ class ClaudePhotoDescriber:
             log.warning("Photo description declined by the model")
             return None
         text = "".join(b.text for b in response.content if b.type == "text").strip()
+        return text[:600] or None
+
+
+class OllamaPhotoDescriber:
+    """Photo descriptions from a vision model on an Ollama server (e.g. gemma3:4b).
+
+    Text-only models such as phi4-mini can't see images; use a model whose Ollama page
+    lists vision.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        host: str = "http://localhost:11434",
+        *,
+        api_key: str = "",
+        max_edge: int = 1024,
+        timeout: float = 90.0,
+    ):
+        if not model.strip():
+            raise ValueError("Set OLLAMA_VISION_MODEL to a vision model, e.g. gemma3:4b.")
+        if not 256 <= max_edge <= 4096:
+            raise ValueError("IMAGE_MAX_EDGE must be between 256 and 4096.")
+        headers = check_ollama_host(host, api_key)
+        self.model = model.strip()
+        self.max_edge = max_edge
+        self.client = ollama.Client(host=host.rstrip("/"), headers=headers, timeout=timeout)
+
+    @classmethod
+    def from_env(cls) -> "OllamaPhotoDescriber":
+        return cls(
+            model=os.getenv("OLLAMA_VISION_MODEL", ""),
+            host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            api_key=os.getenv("OLLAMA_API_KEY", ""),
+            # Local models read images slower; a smaller image keeps replies quick.
+            max_edge=int(os.getenv("IMAGE_MAX_EDGE", "1024")),
+            timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90")),
+        )
+
+    def describe(self, image: bytes, caption: str | None = None) -> str | None:
+        try:
+            jpeg = prepare_image(image, self.max_edge)
+        except (OSError, ValueError, Image.DecompressionBombError):
+            log.warning("Could not read a photo")
+            return None
+        prompt = f"The resident's caption: {caption}" if caption else "No caption was sent."
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": DESCRIBE},
+                    {"role": "user", "content": prompt, "images": [jpeg]},
+                ],
+                options={"temperature": 0, "num_predict": 200},
+            )
+        except (ollama.ResponseError, httpx.HTTPError, ConnectionError, TimeoutError) as exc:
+            log.warning("Photo description failed: %s", type(exc).__name__)
+            return None
+        text = (response.message.content or "").strip()
         return text[:600] or None
 
 

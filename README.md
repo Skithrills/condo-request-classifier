@@ -193,7 +193,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 On macOS/Linux, use `cp -n .env.example .env`. Keep
-`OLLAMA_HOST=http://localhost:11434` and `OLLAMA_MODEL=gemma3:4b` in `.env`.
+`OLLAMA_HOST=http://localhost:11434` in `.env` and set `OLLAMA_MODEL` to the model you pulled.
 Set `OLLAMA_TIMEOUT_SECONDS=120` if cold model loading exceeds the default timeout.
 Select **Ollama** in the sidebar. A local model needs sufficient RAM/VRAM; this
 app does not download or install model weights automatically. The launcher accepts
@@ -304,6 +304,20 @@ once the request is understood. The bot only answers residents in private chats 
 ignores other messages in the staff group. Conversations live in memory and reset
 after 2 idle hours, on `/new`, or when the bot restarts.
 
+**Common questions (FAQ).** Questions like "what time does the gym close?" are answered
+from the building FAQ in `data/condo_faq.csv` (30 synthetic entries for a fictional
+condo; replace them with your building's). This is retrieval-augmented generation: the
+bot finds the closest entries (TF-IDF over each entry's question and keywords, local
+and free) and gives them to the chat model, which answers only from them. A message is
+answered only if it reads like a question *and* an entry scores at least 0.20, because
+a report such as "I was charged twice for my maintenance fee" scores high against the
+fees entry too. On the 46 test messages in `data/faq_eval.csv` that answers 33 of 36
+questions correctly, 1 with the wrong entry, and none of the 10 reports. A standalone
+question is logged as 📖 Answered by FAQ on the dashboard with no staff card; a question
+in the middle of a request just gives the chat model the facts. Emergencies never use
+the FAQ. With `BOT_REPLIES=fixed` the bot sends the entry's answer as written. Turn it
+off with `FAQ=off`, or point `FAQ_PATH` at your own CSV (`id,question,answer,keywords`).
+
 **Run it locally**
 
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
@@ -364,22 +378,74 @@ the table and press 🗑️ **Delete selected** (or use Delete inside a request'
 after a confirmation it removes the requests and their photos; the bot won't save a deleted request again if that resident keeps chatting.
 Run it on the same machine as the bot.
 
+**Run the bot on local models (Ollama, no API key)**
+
+A local Ollama server needs no key (`OLLAMA_API_KEY` is only for Ollama Cloud). Each
+part of the bot picks its model separately in `.env`:
+
+```ini
+CLASSIFIER_BACKEND=ollama      # sorts requests
+OLLAMA_MODEL=phi4-mini         # or the winner of the benchmark below
+CLASSIFIER_FALLBACK=baseline   # if Ollama isn't running, use the offline model
+BOT_REPLIES=ollama             # chat replies (claude, ollama or fixed)
+PHOTOS=ollama                  # photo descriptions (claude, ollama or off)
+OLLAMA_VISION_MODEL=gemma3:4b  # must be a vision model
+```
+
+Text-only models such as `phi4-mini` can't see photos, so photos stay off until
+`OLLAMA_VISION_MODEL` names a model with vision. `OLLAMA_CHAT_MODEL` can give chat a
+different model from the classifier.
+
+**Fallbacks.** Keep Claude as the main model and let local models take over when it
+fails (no credits, a bad key, an outage):
+
+```ini
+CLASSIFIER_BACKEND=claude
+CLASSIFIER_FALLBACK=ollama,baseline   # tried in order
+BOT_REPLIES=claude
+CHAT_FALLBACK=ollama                  # if both fail, the bot sends fixed replies
+```
+
+Each request records which backend classified it, so the dashboard shows when a
+fallback was used.
+
+**Pick a local model**
+
+```sh
+uv run python scripts/benchmark_models.py                      # every installed model
+uv run python scripts/benchmark_models.py phi4-mini gemma4:12b # or just these
+```
+
+Use the names `ollama list` prints. The script runs the 55-message evaluation set
+through each model next to the offline baseline and prints category accuracy, macro F1,
+priority accuracy, invalid outputs, how often the "Model score is below the review
+threshold" note appears, latency, and four sample chat replies per model. It saves
+`reports/model-benchmark.md` and tells you which `OLLAMA_MODEL` to set. The offline
+baseline's scores are spread thin, so about 70% of requests get that note; a model's
+self-reported confidence is usually higher. Staff cards no longer show the "LLM
+confidence is not calibrated" note, which every LLM result carries.
+
 **Try conversations without Telegram**
 
 ```sh
 uv run --extra telegram python scripts/try_conversations.py
 ```
 
-This runs three scripted resident chats through the real bot logic with Claude
-replies, prints each reply with its status and word count, and estimates the cost.
+This runs a few scripted resident chats (including an FAQ question) through the real
+bot logic with the classifier and chat model from `.env`, prints each reply with its
+status and word count, and estimates the cost when Claude is used.
 
 `.env` is gitignored, so your keys stay on your machine. Useful settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
-| `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
+| `BOT_REPLIES` | `claude` | `claude` (or `chat`) or `ollama` for model replies, `fixed` for templates |
+| `CHAT_FALLBACK` | `none` | Chat models to try when the main one fails, e.g. `ollama` |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
+| `CLASSIFIER_FALLBACK` | `baseline` | Backends to try in order when the main one fails, or `none` |
+| `PHOTOS` | `claude` | `claude` (or `on`), `ollama` (needs `OLLAMA_VISION_MODEL`) or `off` |
+| `FAQ` / `FAQ_PATH` | `on` / `data/condo_faq.csv` | Answer common questions from the FAQ |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
 
 Message text is never logged. Claude's system prompt (`SYSTEM`) lives in

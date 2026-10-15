@@ -28,9 +28,11 @@ RESIDENT_CONFIRMED = "✅ Resident confirmed the summary."
 
 def review_notes(reasons: list[str], status: str) -> list[str]:
     """Review notes worth a staff member's attention for a request in this status."""
+    # Every LLM answer is uncalibrated, so that note says nothing about this request.
+    notes = [r for r in reasons if r != UNCALIBRATED]
     if status not in CONFIRMED:
-        return list(reasons)
-    notes = [r for r in reasons if r not in {LOW_SCORE, UNCALIBRATED}]
+        return notes
+    notes = [r for r in notes if r != LOW_SCORE]
     if len(notes) < len(reasons) and status == "submitted":
         notes.append(RESIDENT_CONFIRMED)
     return notes

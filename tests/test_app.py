@@ -183,3 +183,24 @@ def test_icons_are_valid_svg():
     for name in PATHS:
         xml.dom.minidom.parseString(svg(name))
     assert icon("wrench").startswith('<img src="data:image/svg+xml;base64,')
+
+
+def test_dashboard_counts_faq_answers_as_resolved(tmp_path, monkeypatch):
+    from condo_classifier.store import RequestRecord
+
+    record = RequestRecord(
+        "R-FAQ001",
+        1,
+        "Jane",
+        "answered",
+        "facilities",
+        "normal",
+        "T",
+        None,
+        messages=["What time does the gym close?"],
+    )
+    app = dashboard_with(tmp_path, monkeypatch, record)
+    assert not app.exception
+    html = all_html(app)
+    assert "Answered by FAQ" in html
+    assert "1 answered by FAQ" in html
