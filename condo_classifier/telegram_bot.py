@@ -9,11 +9,21 @@ are saved to the SQLite store that the staff dashboard reads.
 import asyncio
 import logging
 import os
+import re
 import time
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
-from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    Bot,
+    BotCommand,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    Update,
+    User,
+)
 from telegram.constants import ReactionEmoji
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
@@ -39,6 +49,7 @@ from condo_classifier.replies import (
     HUMAN_FIRST,
     INVALID,
     NEW_REQUEST,
+    NOT_FOR_YOU,
     NOT_READY,
     PHOTO_TOO_BIG,
     PHOTO_UNAVAILABLE,
@@ -76,8 +87,50 @@ REACTIONS = {
 
 
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
+BOT_TO_BOT_WINDOW = 10 * 60
 # Saved copies for staff: big enough to see small defects, small enough to keep.
 SAVED_PHOTO_EDGE = 2048
+
+
+# A conversation belongs to a private chat (its ID) or, in a group, to one person in it.
+Key = int | tuple[int, int]
+
+
+def key_of(chat: Chat, user: User | None) -> Key:
+    if chat.type == Chat.PRIVATE or user is None:
+        return chat.id
+    return (chat.id, user.id)
+
+
+def chat_of(key: Key) -> int:
+    return key if isinstance(key, int) else key[0]
+
+
+def addressed_text(message: Message, bot: Bot) -> str | None:
+    """The message text without the bot's @mention, if it mentions or replies to this bot.
+
+    None means the message isn't for this bot, so stay quiet. Messages from other bots count
+    too (Telegram only delivers them when they reply to this bot or use /ask@thisbot); the
+    caller limits how often the bot answers them.
+    """
+    if message.from_user is None:
+        return None
+    replied = message.reply_to_message
+    is_reply = (
+        replied is not None
+        and replied.from_user is not None
+        and replied.from_user.id == bot.id
+        # In forum topics every message "replies" to the topic's first message.
+        and not (message.is_topic_message and replied.forum_topic_created)
+    )
+    raw = message.text or message.caption or ""
+    handle = f"@{bot.username}" if bot.username else None
+    mentioned = handle is not None and re.search(rf"{re.escape(handle)}\b", raw, re.I)
+    if not (is_reply or mentioned):
+        return None
+    if handle:
+        raw = re.sub(rf"{re.escape(handle)}\b", "", raw, flags=re.I)
+    return " ".join(raw.split())
 
 
 class ResidentBot:
@@ -88,29 +141,33 @@ class ResidentBot:
         staff_chat_id: int | None = None,
         store: RequestStore | None = None,
         describer: PhotoDescriber | None = None,
+        bot_to_bot_limit: int = 3,
     ):
         self.classifier = classifier
         self.chat = chat
         self.staff_chat_id = staff_chat_id
         self.store = store
         self.describer = describer
-        self.conversations: dict[int, Conversation] = {}
-        self.locks: dict[int, asyncio.Lock] = {}
+        self.conversations: dict[Key, Conversation] = {}
+        self.locks: dict[Key, asyncio.Lock] = {}
+        # Loop guard for groups shared with other bots: recent replies to bots, per chat.
+        self.bot_to_bot_limit = bot_to_bot_limit
+        self.bot_replies: dict[int, list[float]] = {}
 
-    def conversation(self, chat_id: int) -> Conversation:
-        conversation = self.conversations.get(chat_id)
+    def conversation(self, key: Key) -> Conversation:
+        conversation = self.conversations.get(key)
         now = time.monotonic()
         if conversation is None or now - conversation.last_seen > IDLE_RESET_SECONDS:
-            conversation = self.conversations[chat_id] = Conversation()
+            conversation = self.conversations[key] = Conversation()
         conversation.last_seen = now
         return conversation
 
-    def reply_for(self, chat_id: int, text: str) -> str:
+    def reply_for(self, key: Key, text: str) -> str:
         try:
             ResidentRequest(text=text, channel="Telegram")
         except ValidationError:
             return INVALID
-        conversation = self.conversation(chat_id)
+        conversation = self.conversation(key)
         conversation.resident_texts.append(text)
         # Classify the whole conversation so details sent later fill in what was missing.
         request = ResidentRequest(text=conversation.request_text(), channel="Telegram")
@@ -130,7 +187,7 @@ class ResidentBot:
             conversation.status,
             conversation.request_id,
         )
-        self.save(chat_id, conversation)
+        self.save(key, conversation)
         reply = None
         if result.status == "safety_escalation" and not conversation.escalated:
             # Emergencies always get the fixed safety text, never generated wording.
@@ -153,7 +210,7 @@ class ResidentBot:
             return False
         return result.category.value != "other" or conversation.status != "open"
 
-    def save(self, chat_id: int, conversation: Conversation) -> None:
+    def save(self, key: Key, conversation: Conversation) -> None:
         result = conversation.last_result
         if self.store is None or not self.worth_tracking(conversation):
             return
@@ -165,7 +222,7 @@ class ResidentBot:
             self.store.save(
                 RequestRecord(
                     id=conversation.request_id,
-                    chat_id=chat_id,
+                    chat_id=chat_of(key),
                     resident=conversation.resident,
                     status=conversation.status,
                     category=result.category.value,
@@ -267,32 +324,84 @@ class ResidentBot:
         except TelegramError as exc:
             log.warning("Could not post to the staff chat: %s", type(exc).__name__)
 
-    def lock(self, chat_id: int) -> asyncio.Lock:
-        return self.locks.setdefault(chat_id, asyncio.Lock())
+    def lock(self, key: Key) -> asyncio.Lock:
+        return self.locks.setdefault(key, asyncio.Lock())
+
+    @staticmethod
+    def key(update: Update) -> Key:
+        return key_of(update.effective_chat, update.effective_user)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.conversations.pop(update.effective_chat.id, None)
+        self.conversations.pop(self.key(update), None)
         await update.effective_message.reply_text(WELCOME)
 
     async def new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.conversations.pop(update.effective_chat.id, None)
+        self.conversations.pop(self.key(update), None)
         await update.effective_message.reply_text(NEW_REQUEST)
 
     async def text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self.handle_text(update, context, update.effective_message.text)
+
+    async def photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self.handle_photo(update, context, update.effective_message.caption)
+
+    def allow_reply(self, chat_id: int, sender: User) -> bool:
+        """Cap replies to other bots so two bots can't keep answering each other forever.
+
+        A person addressing the bot resets the count for that chat.
+        """
+        if not sender.is_bot:
+            self.bot_replies.pop(chat_id, None)
+            return True
+        now = time.monotonic()
+        recent = [t for t in self.bot_replies.get(chat_id, []) if now - t < BOT_TO_BOT_WINDOW]
+        if len(recent) >= self.bot_to_bot_limit:
+            self.bot_replies[chat_id] = recent
+            log.info("Not replying to a bot: %d bot replies in this chat recently", len(recent))
+            return False
+        self.bot_replies[chat_id] = [*recent, now]
+        return True
+
+    async def group(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """In groups, answer only messages that mention this bot or reply to it."""
         message = update.effective_message
-        chat_id = update.effective_chat.id
-        # One message at a time per chat so the conversation history stays in order.
-        async with self.lock(chat_id):
-            existing = self.conversations.get(chat_id)
-            canned = quick_reply(message.text, existing is None or not existing.resident_texts)
+        text = addressed_text(message, context.bot)
+        if text is None or not self.allow_reply(update.effective_chat.id, message.from_user):
+            return
+        if message.photo or message.document:
+            await self.handle_photo(update, context, text or None)
+        else:
+            # A bare "@bot" is treated like a greeting.
+            await self.handle_text(update, context, text or "hi")
+
+    async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/ask@thisbot <message>: how other bots (and people) address this bot in a group."""
+        message = update.effective_message
+        if message.from_user is None:
+            return
+        if not self.allow_reply(update.effective_chat.id, message.from_user):
+            return
+        await self.handle_text(update, context, " ".join(context.args or []) or "hi")
+
+    async def handle_text(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
+    ) -> None:
+        message = update.effective_message
+        key = self.key(update)
+        # One message at a time per conversation so the history stays in order.
+        async with self.lock(key):
+            existing = self.conversations.get(key)
+            canned = quick_reply(text, existing is None or not existing.resident_texts)
             if canned:
                 # Greetings, and "thanks" after a submitted request, don't open a request.
                 await message.reply_text(canned)
                 return
-            await context.bot.send_chat_action(chat_id, "typing")
-            await self.respond(update, context, message.text)
+            await context.bot.send_chat_action(update.effective_chat.id, "typing")
+            await self.respond(update, context, text)
 
-    async def photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_photo(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, caption: str | None
+    ) -> None:
         """A photo (or an image sent as a file) becomes a described turn in the conversation."""
         message = update.effective_message
         chat_id = update.effective_chat.id
@@ -303,7 +412,7 @@ class ResidentBot:
         if media.file_size and media.file_size > MAX_PHOTO_BYTES:
             await message.reply_text(PHOTO_TOO_BIG)
             return
-        async with self.lock(chat_id):
+        async with self.lock(self.key(update)):
             await context.bot.send_chat_action(chat_id, "typing")
             try:
                 data = bytes(await (await media.get_file()).download_as_bytearray())
@@ -311,7 +420,6 @@ class ResidentBot:
             except Exception:
                 log.warning("Could not download or read a photo")
                 jpeg = None
-            caption = message.caption
             description = None
             if jpeg is not None:
                 description = await asyncio.to_thread(self.describer.describe, jpeg, caption)
@@ -332,8 +440,9 @@ class ResidentBot:
         """Classify a resident turn, reply, and update the staff card. Caller holds the lock."""
         message = update.effective_message
         chat_id = update.effective_chat.id
+        key = self.key(update)
         bot = context.bot
-        conversation = self.conversation(chat_id)
+        conversation = self.conversation(key)
         if photo is not None:
             conversation.pending_photos.append(photo)
         user = update.effective_user
@@ -342,11 +451,11 @@ class ResidentBot:
         previous = conversation.last_result
         try:
             # The classifier and Claude client are synchronous.
-            reply = await asyncio.to_thread(self.reply_for, chat_id, text)
+            reply = await asyncio.to_thread(self.reply_for, key, text)
         except Exception:
             log.exception("Reply failed")
             reply = UNAVAILABLE
-        conversation = self.conversations.get(chat_id)
+        conversation = self.conversations.get(key)
         classified = conversation is not None and conversation.last_result is not previous
         if not classified or conversation.last_result.status == "provider_error":
             await self.react(bot, chat_id, message.message_id, "problem")
@@ -365,10 +474,15 @@ class ResidentBot:
         query = update.callback_query
         action, _, request_id = (query.data or "").partition(":")
         chat_id = query.message.chat.id
+        key = key_of(query.message.chat, query.from_user)
         bot = context.bot
-        async with self.lock(chat_id):
-            conversation = self.conversations.get(chat_id)
+        async with self.lock(key):
+            conversation = self.conversations.get(key)
             if conversation is None or conversation.request_id != request_id:
+                if any(c.request_id == request_id for c in self.conversations.values()):
+                    # In a group, someone else tapped another person's buttons.
+                    await query.answer(NOT_FOR_YOU)
+                    return
                 await query.answer(STALE)
                 await query.edit_message_reply_markup(reply_markup=None)
                 return
@@ -376,9 +490,11 @@ class ResidentBot:
                 await query.answer(NOT_READY)
                 return
             await query.answer()
-            await self.apply(bot, chat_id, conversation, action, query.message.reply_text)
+            await self.apply(bot, chat_id, key, conversation, action, query.message.reply_text)
 
-    async def apply(self, bot: Bot, chat_id: int, conversation: Conversation, action, send):
+    async def apply(
+        self, bot: Bot, chat_id: int, key: Key, conversation: Conversation, action, send
+    ):
         """Submit, cancel or hand a request to a person, from a button or /human."""
         request_id = conversation.request_id
         if action == "submit":
@@ -394,27 +510,34 @@ class ResidentBot:
         else:
             return
         log.info("Resident chose %s for %s", action, request_id)
-        self.save(chat_id, conversation)
+        self.save(key, conversation)
         await self.clear_buttons(bot, chat_id, conversation)
         await send(reply)
         await self.react(bot, chat_id, conversation.last_resident_message_id, conversation.status)
         # Asking for a person posts a fresh card so it notifies staff.
         await self.notify_staff(bot, conversation, fresh=action == "human")
         if action in {"submit", "cancel"}:
-            self.conversations.pop(chat_id, None)
+            self.conversations.pop(key, None)
 
     async def human(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        chat_id = update.effective_chat.id
+        key = self.key(update)
         message = update.effective_message
-        async with self.lock(chat_id):
-            conversation = self.conversations.get(chat_id)
+        async with self.lock(key):
+            conversation = self.conversations.get(key)
             if conversation is None or conversation.last_result is None:
                 await message.reply_text(HUMAN_FIRST)
                 return
             if conversation.human_requested:
                 await message.reply_text(HUMAN_ALREADY)
                 return
-            await self.apply(context.bot, chat_id, conversation, "human", message.reply_text)
+            await self.apply(
+                context.bot,
+                update.effective_chat.id,
+                key,
+                conversation,
+                "human",
+                message.reply_text,
+            )
 
     async def other(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(TEXT_ONLY)
@@ -439,13 +562,23 @@ class ResidentBot:
         except TelegramError as exc:
             log.warning("Could not set the command menu: %s", type(exc).__name__)
 
-    def application(self, token: str) -> Application:
+    def application(self, token: str, group_replies: bool = False) -> Application:
         app = Application.builder().token(token).post_init(self.set_commands).build()
-        # Residents only talk to the bot in private chats; groups are for staff.
-        private = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
-        app.add_handler(CommandHandler(["start", "help"], self.start, filters=private))
-        app.add_handler(CommandHandler("new", self.new, filters=private))
-        app.add_handler(CommandHandler(["human", "person"], self.human, filters=private))
+        new_messages = filters.UpdateType.MESSAGE & ~filters.IS_AUTOMATIC_FORWARD
+        private = filters.ChatType.PRIVATE & new_messages
+        commands = private
+        if group_replies:
+            # Test groups: answer only when mentioned or replied to. Never the staff group.
+            groups = filters.ChatType.GROUPS & new_messages
+            if self.staff_chat_id is not None:
+                groups &= ~filters.Chat(self.staff_chat_id)
+            commands = private | groups
+            media = filters.TEXT | filters.PHOTO | filters.Document.IMAGE
+            app.add_handler(MessageHandler(groups & media & ~filters.COMMAND, self.group))
+            app.add_handler(CommandHandler("ask", self.ask, filters=groups))
+        app.add_handler(CommandHandler(["start", "help"], self.start, filters=commands))
+        app.add_handler(CommandHandler("new", self.new, filters=commands))
+        app.add_handler(CommandHandler(["human", "person"], self.human, filters=commands))
         app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, self.text))
         app.add_handler(
             MessageHandler(private & (filters.PHOTO | filters.Document.IMAGE), self.photo)
@@ -493,6 +626,11 @@ def build_bot() -> ResidentBot:
         except ValueError as exc:
             raise SystemExit(f"Check .env: {exc}") from exc
     log.info("Photos: %s.", "on" if describer else "off")
+    if os.getenv("GROUP_REPLIES", "off") not in {"on", "off"}:
+        raise SystemExit("GROUP_REPLIES must be on or off.")
+    limit = os.getenv("BOT_TO_BOT_LIMIT", "3")
+    if not limit.isdigit():
+        raise SystemExit("BOT_TO_BOT_LIMIT must be a whole number (0 ignores other bots).")
     log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
@@ -501,6 +639,7 @@ def build_bot() -> ResidentBot:
         int(staff_chat_id) if staff_chat_id else None,
         store,
         describer,
+        int(limit),
     )
 
 
@@ -517,7 +656,10 @@ def main() -> None:
         raise SystemExit("Set TELEGRAM_BOT_TOKEN in .env (create a bot with @BotFather).")
     bot = build_bot()
     log.info("Bot is running. Message it on Telegram; press Ctrl+C here to stop.")
-    bot.application(token).run_polling(allowed_updates=Update.ALL_TYPES)
+    group_replies = os.getenv("GROUP_REPLIES", "off") == "on"
+    if group_replies:
+        log.info("Group replies on: answering in groups only when mentioned or replied to.")
+    bot.application(token, group_replies).run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

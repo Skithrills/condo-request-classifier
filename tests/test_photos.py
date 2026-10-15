@@ -195,7 +195,9 @@ def send_photo(bot, tg, caption=None, data=None, file_size=200_000):
         reply_text=AsyncMock(return_value=SimpleNamespace(message_id=301)),
     )
     update = SimpleNamespace(
-        effective_message=message, effective_chat=SimpleNamespace(id=1), effective_user=USER
+        effective_message=message,
+        effective_chat=SimpleNamespace(id=1, type="private"),
+        effective_user=USER,
     )
     asyncio.run(bot.photo(update, SimpleNamespace(bot=tg)))
     return message.reply_text.call_args.args[0]

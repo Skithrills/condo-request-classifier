@@ -67,11 +67,15 @@ HUMAN = (
 
 STALE = "This request is already closed."
 
+NOT_FOR_YOU = "These buttons are for the person who made this request."
+
 HUMAN_FIRST = "Tell me briefly what it's about first, then send /human and I'll get a staff member."
 
 HUMAN_ALREADY = "A staff member has already been asked to take over. They'll contact you."
 
 CLOSING = "Anytime! 👋 Message me whenever you need something."
+
+ACKNOWLEDGED = "👍 Tell me whenever you have more details."
 
 GREETING_REPLY = "Hi! 👋 What can I help with? Include your block or unit if it's about a place."
 
@@ -107,6 +111,10 @@ def quick_reply(text: str, fresh: bool) -> str | None:
     """
     if GREETING.match(text):
         return GREETING_REPLY
-    if fresh and PLEASANTRY.match(text):
-        return CLOSING
+    if PLEASANTRY.match(text):
+        if fresh:
+            return CLOSING
+        # "ok" or "ty" mid-request is too short to classify; don't call it invalid.
+        if len(text.strip()) < 3:
+            return ACKNOWLEDGED
     return None

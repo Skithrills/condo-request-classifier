@@ -43,7 +43,9 @@ def send(bot, tg, text, message_id=100):
         reply_text=AsyncMock(return_value=SimpleNamespace(message_id=message_id + 1)),
     )
     update = SimpleNamespace(
-        effective_message=message, effective_chat=SimpleNamespace(id=1), effective_user=USER
+        effective_message=message,
+        effective_chat=SimpleNamespace(id=1, type="private"),
+        effective_user=USER,
     )
     asyncio.run(bot.text(update, SimpleNamespace(bot=tg)))
     return message.reply_text.call_args
@@ -53,7 +55,8 @@ def tap(bot, tg, data):
     reply = AsyncMock(return_value=SimpleNamespace(message_id=500))
     query = SimpleNamespace(
         data=data,
-        message=SimpleNamespace(chat=SimpleNamespace(id=1), reply_text=reply),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1, type="private"), reply_text=reply),
+        from_user=USER,
         answer=AsyncMock(),
         edit_message_reply_markup=AsyncMock(),
     )
@@ -120,7 +123,11 @@ def test_cancel_and_stale_buttons(baseline, tmp_path):
 
 def command(bot, tg, handler):
     message = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=600)))
-    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
+    update = SimpleNamespace(
+        effective_message=message,
+        effective_chat=SimpleNamespace(id=1, type="private"),
+        effective_user=USER,
+    )
     asyncio.run(handler(update, SimpleNamespace(bot=tg)))
     return message.reply_text.call_args.args[0]
 
@@ -186,6 +193,15 @@ def test_greetings_get_a_prompt_not_an_error(baseline, tmp_path, text):
     assert call.args[0].startswith("Hi! 👋")
     assert store.all() == []
     assert 1 not in bot.conversations
+
+
+def test_short_ok_mid_request_is_acknowledged_not_rejected(baseline, tmp_path):
+    bot, _ = make_bot(baseline, tmp_path)
+    tg = fake_bot()
+    send(bot, tg, "The corridor light keeps flickering")
+    call = send(bot, tg, "ok", message_id=150)
+    assert call.args[0].startswith("👍")
+    assert bot.conversations[1].resident_texts == ["The corridor light keeps flickering"]
 
 
 def test_thanks_mid_request_is_part_of_the_conversation(baseline, tmp_path):

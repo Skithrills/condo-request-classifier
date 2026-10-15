@@ -324,6 +324,20 @@ after 2 idle hours, on `/new`, or when the bot restarts.
 Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
 that requests are not reaching staff.
 
+**Test groups with other bots**
+
+Set `GROUP_REPLIES=on` to let the bot join a shared test group. It answers only messages
+that @mention it, reply to one of its messages, or use `/ask@yourbot <message>`; normal
+messages get no reply. Each person in the group has their own request, and only they can
+tap its buttons. The staff group (`STAFF_CHAT_ID`) never gets resident replies.
+
+Another bot can talk to yours if one of the two has **Bot-to-Bot Communication Mode**
+turned on in @BotFather. Telegram then delivers that bot's message only when it replies
+to your bot or uses `/ask@yourbot ...`; a plain `@yourbot` typed by a bot isn't delivered.
+To stop two bots answering each other forever, the bot replies to other bots at most
+`BOT_TO_BOT_LIMIT` times (default 3) per group within 10 minutes, and the count resets
+when a person addresses it.
+
 **Staff dashboard**
 
 Requests are saved to `data/private/requests.db` (gitignored; change it with

@@ -89,7 +89,7 @@ def run(bot, staff_bot, chat_id, text):
     )
     update = SimpleNamespace(
         effective_message=message,
-        effective_chat=SimpleNamespace(id=chat_id),
+        effective_chat=SimpleNamespace(id=chat_id, type="private"),
         effective_user=USER,
     )
     asyncio.run(bot.text(update, SimpleNamespace(bot=staff_bot)))
