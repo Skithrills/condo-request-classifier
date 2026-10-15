@@ -93,7 +93,27 @@ def requests_view() -> None:
             for r in shown
         ]
     )
-    st.dataframe(table, hide_index=True, width="stretch")
+    picked = st.dataframe(
+        table,
+        hide_index=True,
+        width="stretch",
+        key="requests_table",
+        on_select="rerun",
+        selection_mode="multi-row",
+    )
+    selected = [shown[i].id for i in picked.selection.rows if i < len(shown)]
+    if selected:
+        with st.popover(f"🗑️ Delete {len(selected)} selected", type="primary"):
+            st.write(f"Delete {', '.join(selected)} and their photos? This can't be undone.")
+            # The key names the exact IDs shown, so if a refresh shifts the rows between
+            # opening this and clicking, the click is dropped instead of deleting others.
+            if st.button("Yes, delete", key="delete-" + "-".join(selected), type="primary"):
+                for request_id in selected:
+                    store.delete(request_id)
+                st.toast(f"Deleted {len(selected)} request(s)")
+                st.rerun(scope="fragment")
+    else:
+        st.caption("Tick rows in the table (left edge) to delete them.")
 
     st.subheader("Details")
     for r in shown:
