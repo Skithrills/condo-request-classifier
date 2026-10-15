@@ -88,7 +88,7 @@ def requests_view() -> None:
                 "Priority": r.priority,
                 "Team": r.team,
                 "Location": r.location or "—",
-                "📷": len(r.photos) or "",
+                "📷": f"📷 {len(r.photos)}" if r.photos else "",
                 "Resident": r.resident,
                 "Updated": when(r.updated_at),
             }
@@ -139,8 +139,10 @@ def requests_view() -> None:
                 columns = st.columns(min(len(r.photos), 3))
                 for index, relative in enumerate(r.photos):
                     photo = store.photo_path(relative)
-                    if photo.exists():
+                    try:
                         columns[index % len(columns)].image(str(photo))
+                    except Exception:  # a missing or unreadable file shouldn't break the page
+                        columns[index % len(columns)].caption(f"Photo unavailable: {relative}")
             st.caption(f"Opened {when(r.created_at)} · updated {when(r.updated_at)}")
             with st.popover("🗑️ Delete"):
                 st.write(f"Delete **{r.id}** and its photos? This can't be undone.")

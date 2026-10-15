@@ -45,3 +45,55 @@ def test_changing_engine_clears_result_from_previous_backend():
     ).run()
     assert not app.exception
     assert "single_result" not in app.session_state
+
+
+def test_dashboard_table_converts_cleanly_with_and_without_photos(tmp_path, monkeypatch):
+    import io
+
+    import pyarrow as pa
+    from PIL import Image
+    from streamlit.testing.v1 import AppTest
+
+    from condo_classifier.store import RequestRecord, RequestStore
+
+    store = RequestStore(tmp_path / "requests.db")
+    jpeg = io.BytesIO()
+    Image.new("RGB", (40, 30), (90, 110, 80)).save(jpeg, "JPEG")
+    photo = store.save_photo("R-AAA111", jpeg.getvalue())
+    store.save(
+        RequestRecord("R-AAA111", 1, "Jane", "open", "noise", "normal", "T", None, photos=[photo])
+    )
+    store.save(RequestRecord("R-BBB222", 1, "Alex", "open", "noise", "normal", "T", None))
+    monkeypatch.setenv("REQUESTS_DB", str(store.path))
+    app = AppTest.from_file(ROOT / "dashboard.py", default_timeout=30).run()
+    assert not app.exception
+    table = app.dataframe[0].value
+    # Streamlit only falls back (and logs a traceback each refresh) if this raises.
+    pa.Table.from_pandas(table)
+    assert sorted(table["📷"]) == ["", "📷 1"]
+
+
+def test_dashboard_survives_a_broken_photo_file(tmp_path, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    from condo_classifier.store import RequestRecord, RequestStore
+
+    store = RequestStore(tmp_path / "requests.db")
+    broken = store.save_photo("R-CCC333", b"not an image")
+    store.save(
+        RequestRecord(
+            "R-CCC333",
+            1,
+            "Jane",
+            "open",
+            "noise",
+            "normal",
+            "T",
+            None,
+            photos=[broken, "photos/R-CCC333/9.jpg"],
+        )
+    )
+    monkeypatch.setenv("REQUESTS_DB", str(store.path))
+    app = AppTest.from_file(ROOT / "dashboard.py", default_timeout=30).run()
+    assert not app.exception
+    assert sum("Photo unavailable" in c.value for c in app.caption) == 2
