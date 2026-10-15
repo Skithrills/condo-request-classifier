@@ -74,6 +74,10 @@ class Conversation:
     pending_photos: list[bytes] = field(default_factory=list)
     photos: list[str] = field(default_factory=list)
     staff_photos_sent: int = 0
+    # Who this conversation belongs to (see telegram_bot.Key), and whether a staff member
+    # has taken over: while they have, the AI stays quiet and messages go to staff.
+    key: object = None
+    human_active: bool = False
     # Store bookkeeping: saved at least once, and whether staff have since deleted it.
     saved: bool = False
     deleted: bool = False

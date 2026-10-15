@@ -21,9 +21,11 @@ st.set_page_config(page_title="Requests | Management Agent", page_icon="📋", l
 STATUS_LABELS = {
     "emergency": "🚨 Emergency",
     "needs_human": "🙋 Wants a person",
+    "with_staff": "👤 With staff",
     "submitted": "✅ Submitted",
     "ready": "📝 Ready, not submitted",
     "open": "💬 In conversation",
+    "resolved": "✔️ Resolved",
     "cancelled": "✖️ Cancelled",
 }
 # Most urgent first.
@@ -60,7 +62,7 @@ def requests_view() -> None:
         statuses = st.multiselect(
             "Status",
             STATUS_ORDER,
-            default=[s for s in STATUS_ORDER if s != "cancelled"],
+            default=[s for s in STATUS_ORDER if s not in {"resolved", "cancelled"}],
             format_func=STATUS_LABELS.get,
         )
     with right:

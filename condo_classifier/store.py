@@ -9,7 +9,16 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-STATUSES = ("open", "ready", "submitted", "needs_human", "emergency", "cancelled")
+STATUSES = (
+    "open",
+    "ready",
+    "submitted",
+    "needs_human",
+    "with_staff",
+    "resolved",
+    "emergency",
+    "cancelled",
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (

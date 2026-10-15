@@ -325,6 +325,16 @@ after 2 idle hours, on `/new`, or when the bot restarts.
 Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
 that requests are not reaching staff.
 
+**Staff replying through the bot**
+
+In the staff group, **reply** to a request card (or to a resident message the bot
+forwarded) and the bot sends it to the resident as "👤 Sarah (staff): ...". From then
+on the AI stays quiet for that resident: their messages and photos are forwarded under
+the card, though a new emergency still gets the safety text at once. Reply **`/done`**
+to the card to finish; the resident is told and the AI takes over again. The dashboard
+shows these requests as 👤 With staff and then ✔️ Resolved. A 👍 on your message means
+it reached the resident. Normal chat in the staff group is ignored.
+
 **Test groups with other bots**
 
 Set `GROUP_REPLIES=on` to let the bot join a shared test group. It answers only messages

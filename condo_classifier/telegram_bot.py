@@ -44,6 +44,8 @@ from condo_classifier.chat import (
 )
 from condo_classifier.replies import (
     CANCELLED,
+    EMERGENCY,
+    HANDED_BACK,
     HUMAN,
     HUMAN_ALREADY,
     HUMAN_FIRST,
@@ -54,6 +56,10 @@ from condo_classifier.replies import (
     PHOTO_TOO_BIG,
     PHOTO_UNAVAILABLE,
     PHOTO_UNREADABLE,
+    STAFF_MESSAGE,
+    STAFF_TEXT_ONLY,
+    STAFF_UNDELIVERED,
+    STAFF_UNKNOWN,
     STALE,
     SUBMITTED,
     TEXT_ONLY,
@@ -65,6 +71,7 @@ from condo_classifier.replies import (
 )
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
+from condo_classifier.signals import safety_signal
 from condo_classifier.staff import new_request_id, resident_label, staff_card
 from condo_classifier.store import RequestRecord, RequestStore, default_store_path
 from condo_classifier.vision import (
@@ -83,6 +90,8 @@ REACTIONS = {
     "needs_human": ReactionEmoji.PERSON_WITH_FOLDED_HANDS,
     "emergency": ReactionEmoji.FACE_SCREAMING_IN_FEAR,
     "problem": ReactionEmoji.THINKING_FACE,
+    # On a staff member's message in the staff group: it reached the resident.
+    "delivered": ReactionEmoji.THUMBS_UP,
 }
 
 
@@ -153,12 +162,15 @@ class ResidentBot:
         # Loop guard for groups shared with other bots: recent replies to bots, per chat.
         self.bot_to_bot_limit = bot_to_bot_limit
         self.bot_replies: dict[int, list[float]] = {}
+        # Staff-group message IDs (cards, photos, forwarded messages) -> resident conversation,
+        # so a staff member's reply reaches the right resident.
+        self.staff_threads: dict[int, Key] = {}
 
     def conversation(self, key: Key) -> Conversation:
         conversation = self.conversations.get(key)
         now = time.monotonic()
         if conversation is None or now - conversation.last_seen > IDLE_RESET_SECONDS:
-            conversation = self.conversations[key] = Conversation()
+            conversation = self.conversations[key] = Conversation(key=key)
         conversation.last_seen = now
         return conversation
 
@@ -292,12 +304,13 @@ class ResidentBot:
             conversation.staff_photos_sent += 1
             try:
                 with self.store.photo_path(relative).open("rb") as photo:
-                    await bot.send_photo(
+                    sent = await bot.send_photo(
                         self.staff_chat_id,
                         photo,
                         caption=f"📷 {conversation.request_id}",
                         reply_to_message_id=conversation.staff_message_id,
                     )
+                self.staff_threads[sent.message_id] = conversation.key
             except (OSError, TelegramError) as exc:
                 log.warning("Could not send a photo to staff: %s", type(exc).__name__)
 
@@ -329,6 +342,7 @@ class ResidentBot:
                     # The card was deleted or is too old to edit: post a new one.
             sent = await bot.send_message(self.staff_chat_id, card)
             conversation.staff_message_id = sent.message_id
+            self.staff_threads[sent.message_id] = conversation.key
             log.info("Staff card %s posted", conversation.request_id)
         except TelegramError as exc:
             log.warning("Could not post to the staff chat: %s", type(exc).__name__)
@@ -406,6 +420,9 @@ class ResidentBot:
         # One message at a time per conversation so the history stays in order.
         async with self.lock(key):
             existing = self.conversations.get(key)
+            if existing is not None and existing.human_active:
+                await self.forward_to_staff(update, context, existing, text)
+                return
             canned = quick_reply(text, existing is None or not existing.resident_texts)
             if canned:
                 # Greetings, and "thanks" after a submitted request, don't open a request.
@@ -420,6 +437,11 @@ class ResidentBot:
         """A photo (or an image sent as a file) becomes a described turn in the conversation."""
         message = update.effective_message
         chat_id = update.effective_chat.id
+        existing = self.conversations.get(self.key(update))
+        if existing is not None and existing.human_active:
+            async with self.lock(self.key(update)):
+                await self.forward_to_staff(update, context, existing, caption, photo=True)
+            return
         if self.describer is None:
             await message.reply_text(PHOTO_UNAVAILABLE)
             return
@@ -444,6 +466,140 @@ class ResidentBot:
                 return
             log.info("Photo described (%d chars)", len(description))
             await self.respond(update, context, photo_message(description, caption), jpeg)
+
+    async def forward_to_staff(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        conversation: Conversation,
+        text: str | None,
+        photo: bool = False,
+    ) -> None:
+        """While a staff member has taken over, pass the resident's messages to the staff
+        group under the request card instead of answering with the AI."""
+        message = update.effective_message
+        bot = context.bot
+        if text and safety_signal(text):
+            # Staff are in the chat, but a new emergency still gets the safety text at once.
+            await message.reply_text(EMERGENCY)
+        name = conversation.resident.split(" (")[0]
+        label = f"💬 {conversation.request_id} · {name}"
+        conversation.last_resident_message_id = message.message_id
+        if text:
+            conversation.resident_texts.append(text if not photo else f"[Photo] {text}")
+        elif photo:
+            conversation.resident_texts.append("[Photo]")
+        self.save(conversation.key, conversation)
+        if self.staff_chat_id is None:
+            return
+        try:
+            if photo:
+                sent = await bot.copy_message(
+                    self.staff_chat_id,
+                    update.effective_chat.id,
+                    message.message_id,
+                    caption=f"{label}: {text}" if text else label,
+                    reply_to_message_id=conversation.staff_message_id,
+                )
+            else:
+                sent = await bot.send_message(
+                    self.staff_chat_id,
+                    f"{label}: {text}",
+                    reply_to_message_id=conversation.staff_message_id,
+                )
+            self.staff_threads[sent.message_id] = conversation.key
+        except TelegramError as exc:
+            log.warning("Could not forward a message to staff: %s", type(exc).__name__)
+
+    def staff_target(self, replied: Message) -> Key | None:
+        """Which resident a staff reply is for: the card it replies to, or its request ID."""
+        if replied.message_id in self.staff_threads:
+            return self.staff_threads[replied.message_id]
+        found = re.search(r"\bR-[0-9A-F]{6}\b", replied.text or replied.caption or "")
+        if not found:
+            return None
+        request_id = found.group()
+        for key, conversation in self.conversations.items():
+            if conversation.request_id == request_id:
+                return key
+        record = self.store.get(request_id) if self.store else None
+        # After a restart only private chats can be reached: their key is the chat ID.
+        if record is not None and record.chat_id > 0:
+            return record.chat_id
+        return None
+
+    async def staff_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """A staff member replied to a request card (or a forwarded message) in the staff
+        group: send it to the resident and take the conversation over from the AI."""
+        message = update.effective_message
+        replied = message.reply_to_message
+        bot = context.bot
+        if replied is None or replied.from_user is None or replied.from_user.id != bot.id:
+            return  # staff talking among themselves
+        key = self.staff_target(replied)
+        if key is None:
+            await message.reply_text(STAFF_UNKNOWN)
+            return
+        if not message.text:
+            await message.reply_text(STAFF_TEXT_ONLY)
+            return
+        async with self.lock(key):
+            conversation = self.conversations.get(key)
+            staff_name = message.from_user.first_name if message.from_user else "Staff"
+            try:
+                await bot.send_message(
+                    chat_of(key),
+                    STAFF_MESSAGE.format(name=staff_name, text=message.text),
+                    reply_to_message_id=(
+                        conversation.last_resident_message_id
+                        if conversation is not None and not isinstance(key, int)
+                        else None
+                    ),
+                )
+            except TelegramError as exc:
+                log.warning("Could not deliver a staff reply: %s", type(exc).__name__)
+                await message.reply_text(STAFF_UNDELIVERED)
+                return
+            self.staff_threads[message.message_id] = key
+            await self.react(bot, self.staff_chat_id, message.message_id, "delivered")
+            if conversation is None:
+                return
+            log.info("Staff replied on %s", conversation.request_id)
+            if not conversation.human_active:
+                conversation.human_active = True
+                conversation.human_requested = True
+                conversation.status = "with_staff"
+                await self.clear_buttons(bot, chat_of(key), conversation)
+                self.save(key, conversation)
+                await self.post_card(bot, conversation)
+
+    async def staff_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/done as a reply to a request card: hand the resident back to the AI."""
+        message = update.effective_message
+        replied = message.reply_to_message
+        bot = context.bot
+        if replied is None or replied.from_user is None or replied.from_user.id != bot.id:
+            await message.reply_text("Reply /done to the request card you're finishing.")
+            return
+        key = self.staff_target(replied)
+        conversation = self.conversations.get(key) if key is not None else None
+        if conversation is None:
+            await message.reply_text(STAFF_UNKNOWN)
+            return
+        async with self.lock(key):
+            conversation.status = "resolved"
+            conversation.human_active = False
+            self.save(key, conversation)
+            await self.post_card(bot, conversation)
+            try:
+                await bot.send_message(
+                    chat_of(key), HANDED_BACK.format(request_id=conversation.request_id)
+                )
+            except TelegramError as exc:
+                log.warning("Could not tell the resident: %s", type(exc).__name__)
+            await self.react(bot, self.staff_chat_id, message.message_id, "delivered")
+            log.info("Staff finished %s", conversation.request_id)
+            self.conversations.pop(key, None)
 
     async def respond(
         self,
@@ -600,6 +756,11 @@ class ResidentBot:
         )
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         app.add_handler(CallbackQueryHandler(self.button, pattern=r"^(submit|cancel|human):"))
+        if self.staff_chat_id is not None:
+            # Staff reply to a request card to message the resident; /done hands back to the AI.
+            staff = filters.Chat(self.staff_chat_id) & filters.UpdateType.MESSAGE & filters.REPLY
+            app.add_handler(CommandHandler("done", self.staff_done, filters=staff))
+            app.add_handler(MessageHandler(staff & ~filters.COMMAND, self.staff_reply))
         # CommandHandler ignores channel posts, so match /chatid as text to cover channels.
         chat_id_command = filters.Regex(r"^/chatid(@\w+)?$") & ~filters.UpdateType.EDITED
         app.add_handler(MessageHandler(chat_id_command, self.chat_id))

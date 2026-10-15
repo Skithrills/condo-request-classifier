@@ -11,6 +11,8 @@ MAX_CARD_CHARS = 4000  # Telegram allows 4,096
 STATUS_HEADERS = {
     "emergency": "🚨 EMERGENCY",
     "needs_human": "🙋 Resident wants a person",
+    "with_staff": "👤 With staff · reply to this card to message the resident, /done to finish",
+    "resolved": "✔️ Resolved by staff",
     "submitted": "✅ Work order submitted",
     "cancelled": "✖️ Cancelled by resident",
     "ready": "📝 Ready, waiting for resident",

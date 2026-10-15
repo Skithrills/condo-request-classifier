@@ -33,14 +33,17 @@ UNAVAILABLE = (
 )
 
 
+EMERGENCY = (
+    "🚨 If anyone is in danger, call your local emergency number now. I've alerted "
+    "building staff, but this chat isn't an emergency service."
+)
+
+
 def resident_reply(result: Classification) -> str:
     """Short template reply without internal scores or review notes. Used when Claude is off
     or unavailable, and always for emergencies."""
     if result.status == "safety_escalation":
-        return (
-            "🚨 If anyone is in danger, call your local emergency number now. I've alerted "
-            "building staff, but this chat isn't an emergency service."
-        )
+        return EMERGENCY
     if result.status == "provider_error":
         return UNAVAILABLE
     if result.category == Category.OTHER:
@@ -61,9 +64,22 @@ SUBMITTED = "✅ Submitted as {request_id}. Staff will follow up. Send /new for 
 CANCELLED = "Cancelled. Message me anytime if you need something."
 
 HUMAN = (
-    "🙋 I've asked a staff member to take over {request_id}. They'll contact you. "
-    "You can keep adding details here."
+    "🙋 I've asked a staff member to take over {request_id}. They'll reply here. "
+    "You can keep adding details in the meantime."
 )
+
+STAFF_MESSAGE = "👤 {name} (staff): {text}"
+
+HANDED_BACK = (
+    "✔️ The staff member has finished with {request_id}. I'm back. "
+    "Message me anytime if you need anything else."
+)
+
+STAFF_UNKNOWN = "I can't tell which request that is. Reply to the request card."
+
+STAFF_TEXT_ONLY = "Only text replies are sent to residents for now."
+
+STAFF_UNDELIVERED = "⚠️ Couldn't deliver that to the resident (they may have blocked the bot)."
 
 STALE = "This request is already closed."
 
