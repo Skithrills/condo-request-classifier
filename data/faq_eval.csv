@@ -1,0 +1,47 @@
+text,faq_id
+what time does the gym close,gym-hours
+is the gym open on sunday?,gym-hours
+till what time can i swim,pool-hours
+pool open on monday afternoon?,pool-hours
+how to reserve the bbq pit for saturday,bbq-booking
+can i book a barbecue pit for next week,bbq-booking
+it rained so i cancelled my bbq. how do i get my deposit back?,bbq-refund
+how much is the function room,function-room
+i want to hold a birthday party in the function hall,function-room
+how do i reserve a tennis court,tennis-court
+when is the management office open,office-hours
+is the office open on saturday,office-hours
+whats the office email,office-contact
+i lost my access card what do i do,access-card
+need another access card for my helper,extra-card
+where do my guests park their car,visitor-parking
+how much is season parking,season-parking
+what time can my contractor start drilling,renovation-hours
+can renovation work be done on sunday,renovation-hours
+how to apply for renovation approval,renovation-permit
+i'm moving out next month how do i book the lift,moving
+how do i throw away an old sofa,bulky-waste
+where are the recycling bins,recycling
+can i throw glass bottles down the chute,rubbish-chute
+what time are quiet hours,quiet-hours
+can i keep a dog,pets
+where do i collect my parcel,parcels
+how to pay maintenance fees,maintenance-fee
+can i get a receipt for my payment,fee-statement
+is there a water shutdown this week,water-outage
+can my aircon guy service the unit on the ledge,aircon
+is smoking allowed at the pool deck,smoking
+can i bring friends to the pool,guests-pool
+my friend left my keys at the guardhouse,key-collection
+when is the lift servicing,lift-maintenance
+where can i wash my car,car-wash
+the corridor light outside my unit keeps flickering,
+water is leaking from my ceiling,
+my neighbour is playing loud music every night,
+there are cockroaches at the bin centre,
+a car is blocking my lot in the basement,
+the lift in block 2 is broken,
+i was charged twice for my maintenance fee,
+hello,
+my toilet is choked,
+someone is smoking at the staircase every night,

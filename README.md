@@ -20,7 +20,8 @@ browser on a computer or phone.
 | View or download | File |
 | --- | --- |
 | Video, approximately 79 seconds | [MP4](output/demo/Management_Agent_Classifier_Demo.mp4) |
-| Presentation | [PDF](output/slides/Management_Agent_Classifier_Showcase.pdf) · [Editable PowerPoint](output/slides/Management_Agent_Classifier_Showcase.pptx) |
+| Telegram bot deck (latest) | [PDF](output/slides/Condo_AI_Agent_Telegram_Bot.pdf) · [Editable PowerPoint](output/slides/Condo_AI_Agent_Telegram_Bot.pptx) |
+| Classifier showcase (earlier) | [PDF](output/slides/Management_Agent_Classifier_Showcase.pdf) · [Editable PowerPoint](output/slides/Management_Agent_Classifier_Showcase.pptx) |
 | Hero images | [Project showcase](output/hero/01-classifier-showcase.png) · [Classifier architecture](output/hero/02-classifier-architecture.png) |
 | Everything for presenting | [Release downloads](https://github.com/Skithrills/condo-request-classifier/releases/latest) |
 | Complete source and media | [Download ZIP](https://github.com/Skithrills/condo-request-classifier/archive/refs/heads/main.zip) |
@@ -192,7 +193,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 On macOS/Linux, use `cp -n .env.example .env`. Keep
-`OLLAMA_HOST=http://localhost:11434` and `OLLAMA_MODEL=gemma3:4b` in `.env`.
+`OLLAMA_HOST=http://localhost:11434` in `.env` and set `OLLAMA_MODEL` to the model you pulled.
 Set `OLLAMA_TIMEOUT_SECONDS=120` if cold model loading exceeds the default timeout.
 Select **Ollama** in the sidebar. A local model needs sufficient RAM/VRAM; this
 app does not download or install model weights automatically. The launcher accepts
@@ -269,17 +270,53 @@ to your Anthropic account; a short classification costs a fraction of a cent.
 Residents can chat with the bot on Telegram. Every message goes through the
 classifier first, using everything the resident has said so far, so details sent
 later (like a unit number) fill in what was missing. Claude Haiku 5.5 then writes a
-short, natural reply from the classifier's notes and asks for anything still
-missing. Emergencies always get the fixed safety text, never generated wording. The
-bot cannot approve, book or pay for anything. Conversations live in memory and
-reset after 2 idle hours, on `/new`, or when the bot restarts.
+short reply from the classifier's notes. It only asks a question when the
+classifier says a detail is missing, so it stops asking once the request is complete.
+Emergencies always get the fixed safety text, never generated wording. The bot
+cannot approve, book or pay for anything. Greetings and a closing "thanks" get a
+quick canned reply and never open a request.
+
+**Photos.** Residents can send a photo (with or without a caption) or an image file.
+Claude Haiku 5.5 describes it in a sentence or two, and the description joins the
+conversation as `[Photo: ...]`, so the classifier, safety screen, chat, staff card and
+dashboard all use it like text. Photos over `IMAGE_MAX_EDGE` pixels are shrunk first,
+which loses nothing the model would see. Saved copies go next to the request database
+(`data/private/photos/`), are posted under the staff card, and appear on the dashboard.
+Photos are saved only once a request is understood. For off-topic photos the offline
+baseline classifier can guess a category; `CLASSIFIER_BACKEND=claude` reads them better.
+
+**Buttons.** While the bot is still asking for details there are no buttons. Once a
+request has everything it needs, the bot shows a 📋 work-order summary with
+**✅ Submit**, **✖️ Cancel** and **🙋 Talk to a person**. Residents can also send
+`/human` at any time to get a staff member, which pings staff with a fresh card.
+Submitting or cancelling closes the request; the next message starts a new one.
+
+**Reactions.** The bot reacts only when a request changes state: 👌 ready to submit ·
+🫡 submitted · 🙏 wants a person · 😱 emergency · 🤔 couldn't understand or something
+failed.
 
 Each request also appears in a staff Telegram group or channel as one card with
-the category, team, priority, location, missing details, review notes and the
-resident's messages. The card is edited in place as the resident adds details, so
-the group is not flooded. A new request (after `/new`) gets a new card, and an
-emergency posts a fresh 🚨 message so it notifies everyone. The bot only answers
-residents in private chats and ignores other messages in the staff group.
+the status, category, team, priority, location, missing details, review notes and the
+resident's messages. The card is edited in place as the resident adds details or taps
+a button, so the group is not flooded. An emergency or a request for a person posts a
+fresh message so it notifies everyone. Greetings and unclear chatter only reach staff
+once the request is understood. The bot only answers residents in private chats and
+ignores other messages in the staff group. Conversations live in memory and reset
+after 2 idle hours, on `/new`, or when the bot restarts.
+
+**Common questions (FAQ).** Questions like "what time does the gym close?" are answered
+from the building FAQ in `data/condo_faq.csv` (30 synthetic entries for a fictional
+condo; replace them with your building's). This is retrieval-augmented generation: the
+bot finds the closest entries (TF-IDF over each entry's question and keywords, local
+and free) and gives them to the chat model, which answers only from them. A message is
+answered only if it reads like a question *and* an entry scores at least 0.20, because
+a report such as "I was charged twice for my maintenance fee" scores high against the
+fees entry too. On the 46 test messages in `data/faq_eval.csv` that answers 33 of 36
+questions correctly, 1 with the wrong entry, and none of the 10 reports. A standalone
+question is logged as 📖 Answered by FAQ on the dashboard with no staff card; a question
+in the middle of a request just gives the chat model the facts. Emergencies never use
+the FAQ. With `BOT_REPLIES=fixed` the bot sends the entry's answer as written. Turn it
+off with `FAQ=off`, or point `FAQ_PATH` at your own CSV (`id,question,answer,keywords`).
 
 **Run it locally**
 
@@ -302,17 +339,118 @@ residents in private chats and ignores other messages in the staff group.
 Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
 that requests are not reaching staff.
 
+**Staff replying through the bot**
+
+In the staff group, **reply** to a request card (or to a resident message the bot
+forwarded) and the bot sends it to the resident as "👤 Staff: ..." (staff names aren't shown). From then
+on the AI stays quiet for that resident: their messages and photos are forwarded under
+the card, though a new emergency still gets the safety text at once. Reply **`/done`**
+to the card to finish; the resident is told and the AI takes over again. The dashboard
+shows these requests as 👤 With staff and then ✔️ Resolved. A 👍 on your message means
+it reached the resident. Normal chat in the staff group is ignored.
+
+**Test groups with other bots**
+
+Set `GROUP_REPLIES=on` to let the bot join a shared test group. It answers only messages
+that @mention it, reply to one of its messages, or use `/ask@yourbot <message>`; normal
+messages get no reply. Each person in the group has their own request, and only they can
+tap its buttons. The staff group (`STAFF_CHAT_ID`) never gets resident replies.
+
+Another bot can talk to yours if one of the two has **Bot-to-Bot Communication Mode**
+turned on in @BotFather. Telegram then delivers that bot's message only when it replies
+to your bot or uses `/ask@yourbot ...`; a plain `@yourbot` typed by a bot isn't delivered.
+To stop two bots answering each other forever, the bot replies to other bots at most
+`BOT_TO_BOT_LIMIT` times (default 3) per group within 10 minutes, and the count resets
+when a person addresses it.
+
+**Staff dashboard**
+
+Requests are saved to `data/private/requests.db` (gitignored; change it with
+`REQUESTS_DB`). With the bot running, double-click **`run_dashboard.cmd`** (or run
+`./run_dashboard.sh`) and open http://localhost:8502. An overview panel shows what
+needs attention, new work orders, requests with staff or still with the bot, and the
+queue's status mix. Below it, each request is a card with the resident's Telegram
+profile photo (when their privacy settings allow; initials otherwise), status,
+category, location, team and latest message, with the full conversation, notes and
+photos one click away. Filters sit in the sidebar and the page refreshes every 15
+seconds (pause it with Live refresh while deleting). Tick rows in
+the table and press 🗑️ **Delete selected** (or use Delete inside a request's details);
+after a confirmation it removes the requests and their photos; the bot won't save a deleted request again if that resident keeps chatting.
+Run it on the same machine as the bot.
+
+**Run the bot on local models (Ollama, no API key)**
+
+A local Ollama server needs no key (`OLLAMA_API_KEY` is only for Ollama Cloud). Each
+part of the bot picks its model separately in `.env`:
+
+```ini
+CLASSIFIER_BACKEND=ollama      # sorts requests
+OLLAMA_MODEL=phi4-mini         # or the winner of the benchmark below
+CLASSIFIER_FALLBACK=baseline   # if Ollama isn't running, use the offline model
+BOT_REPLIES=ollama             # chat replies (claude, ollama or fixed)
+PHOTOS=ollama                  # photo descriptions (claude, ollama or off)
+OLLAMA_VISION_MODEL=gemma3:4b  # must be a vision model
+```
+
+Text-only models such as `phi4-mini` can't see photos, so photos stay off until
+`OLLAMA_VISION_MODEL` names a model with vision. `OLLAMA_CHAT_MODEL` can give chat a
+different model from the classifier.
+
+**Fallbacks.** Keep Claude as the main model and let local models take over when it
+fails (no credits, a bad key, an outage):
+
+```ini
+CLASSIFIER_BACKEND=claude
+CLASSIFIER_FALLBACK=ollama,baseline   # tried in order
+BOT_REPLIES=claude
+CHAT_FALLBACK=ollama                  # if both fail, the bot sends fixed replies
+```
+
+Each request records which backend classified it, so the dashboard shows when a
+fallback was used.
+
+**Pick a local model**
+
+```sh
+uv run python scripts/benchmark_models.py                      # every installed model
+uv run python scripts/benchmark_models.py phi4-mini gemma4:12b # or just these
+```
+
+Use the names `ollama list` prints. The script runs the 55-message evaluation set
+through each model next to the offline baseline and prints category accuracy, macro F1,
+priority accuracy, invalid outputs, how often the "Model score is below the review
+threshold" note appears, latency, and four sample chat replies per model. It saves
+`reports/model-benchmark.md` and tells you which `OLLAMA_MODEL` to set. The offline
+baseline's scores are spread thin, so about 70% of requests get that note; a model's
+self-reported confidence is usually higher. Staff cards no longer show the "LLM
+confidence is not calibrated" note, which every LLM result carries.
+
+**Try conversations without Telegram**
+
+```sh
+uv run --extra telegram python scripts/try_conversations.py
+```
+
+This runs a few scripted resident chats (including an FAQ question) through the real
+bot logic with the classifier and chat model from `.env`, prints each reply with its
+status and word count, and estimates the cost when Claude is used.
+
 `.env` is gitignored, so your keys stay on your machine. Useful settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
-| `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
+| `BOT_REPLIES` | `claude` | `claude` (or `chat`) or `ollama` for model replies, `fixed` for templates |
+| `CHAT_FALLBACK` | `none` | Chat models to try when the main one fails, e.g. `ollama` |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
+| `CLASSIFIER_FALLBACK` | `baseline` | Backends to try in order when the main one fails, or `none` |
+| `PHOTOS` | `claude` | `claude` (or `on`), `ollama` (needs `OLLAMA_VISION_MODEL`) or `off` |
+| `FAQ` / `FAQ_PATH` | `on` / `data/condo_faq.csv` | Answer common questions from the FAQ |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
 
-Message text is never logged. Chat reply wording rules live in
-`condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`.
+Message text is never logged. Claude's system prompt (`SYSTEM`) lives in
+`condo_classifier/chat.py`; fixed replies and button texts live in
+`condo_classifier/replies.py`.
 
 ## Command line and Python
 

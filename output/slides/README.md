@@ -1,4 +1,17 @@
-# Management Agent classifier showcase
+# Management Agent slides
+
+## Condo AI Agent: Telegram bot deck (latest)
+
+`Condo_AI_Agent_Telegram_Bot.pptx` (editable) and `Condo_AI_Agent_Telegram_Bot.pdf`
+present the Telegram bot prototype in ten slides: the request flow, backend
+architecture, a real Claude Haiku 5.5 conversation, the safety screen, photo support,
+the staff views, evidence, a live demo script and next steps. Speaker notes are in the
+PowerPoint file. All messages and dashboard data are synthetic. Rebuild it with
+`npm install pptxgenjs react-icons react react-dom sharp` and
+`node scripts/build_bot_slides.js`.
+
+## Classifier showcase (earlier)
+
 
 Open `Management_Agent_Classifier_Showcase.pptx` for editable slide text and the
 native evaluation table. The app screenshots remain images. Open the PDF for a
