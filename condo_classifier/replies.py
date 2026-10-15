@@ -68,7 +68,8 @@ HUMAN = (
     "You can keep adding details in the meantime."
 )
 
-STAFF_MESSAGE = "👤 {name} (staff): {text}"
+# Staff names are not shown to residents.
+STAFF_MESSAGE = "👤 Staff: {text}"
 
 HANDED_BACK = (
     "✔️ The staff member has finished with {request_id}. I'm back. "

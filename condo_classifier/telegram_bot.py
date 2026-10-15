@@ -545,11 +545,10 @@ class ResidentBot:
             return
         async with self.lock(key):
             conversation = self.conversations.get(key)
-            staff_name = message.from_user.first_name if message.from_user else "Staff"
             try:
                 await bot.send_message(
                     chat_of(key),
-                    STAFF_MESSAGE.format(name=staff_name, text=message.text),
+                    STAFF_MESSAGE.format(text=message.text),
                     reply_to_message_id=(
                         conversation.last_resident_message_id
                         if conversation is not None and not isinstance(key, int)

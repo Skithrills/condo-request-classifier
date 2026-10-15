@@ -328,7 +328,7 @@ that requests are not reaching staff.
 **Staff replying through the bot**
 
 In the staff group, **reply** to a request card (or to a resident message the bot
-forwarded) and the bot sends it to the resident as "👤 Sarah (staff): ...". From then
+forwarded) and the bot sends it to the resident as "👤 Staff: ..." (staff names aren't shown). From then
 on the AI stays quiet for that resident: their messages and photos are forwarded under
 the card, though a new emergency still gets the safety text at once. Reply **`/done`**
 to the card to finish; the resident is told and the AI takes over again. The dashboard

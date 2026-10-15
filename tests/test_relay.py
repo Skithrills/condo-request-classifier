@@ -110,7 +110,7 @@ def test_staff_reply_reaches_resident_and_takes_over(baseline, tmp_path):
 
     staff_says(bot, tg, "Hi Jane, which floor is this?", card_id(bot))
     to_resident = tg.send_message.call_args
-    assert to_resident.args == (42, "👤 Sarah (staff): Hi Jane, which floor is this?")
+    assert to_resident.args == (42, "👤 Staff: Hi Jane, which floor is this?")
     assert tg.set_message_reaction.call_args.args == (STAFF, 5000, "👍")
     assert store.get(request_id).status == "with_staff"
     assert tg.edit_message_text.call_args.args[0].startswith("👤 With staff")
@@ -128,7 +128,7 @@ def test_staff_reply_reaches_resident_and_takes_over(baseline, tmp_path):
     # Staff can also reply to the forwarded message, not just the card.
     forwarded_id = max(bot.staff_threads)
     staff_says(bot, tg, "Thanks, sending someone", forwarded_id)
-    assert tg.send_message.call_args.args[1] == "👤 Sarah (staff): Thanks, sending someone"
+    assert tg.send_message.call_args.args[1] == "👤 Staff: Thanks, sending someone"
 
 
 def test_done_hands_back_to_the_ai(baseline, tmp_path):
@@ -178,7 +178,7 @@ def test_reply_by_request_id_after_restart(baseline, tmp_path):
     request_id = bot.conversations[42].request_id
     restarted = ResidentBot(bot.classifier, FakeChat(), STAFF, store)
     staff_says(restarted, tg, "Still happening?", 999, f"✅ Work order submitted · {request_id}")
-    assert tg.send_message.call_args.args == (42, "👤 Sarah (staff): Still happening?")
+    assert tg.send_message.call_args.args == (42, "👤 Staff: Still happening?")
 
 
 def test_blocked_resident_is_reported_to_staff(baseline, tmp_path):
