@@ -172,3 +172,20 @@ def test_invalid_staff_chat_id_rejected(monkeypatch):
     monkeypatch.setenv("STAFF_CHAT_ID", "@staffgroup")
     with pytest.raises(SystemExit, match="STAFF_CHAT_ID must be a number"):
         build_bot()
+
+
+def test_resident_confirmation_replaces_model_uncertainty_notes():
+    from condo_classifier.service import LOW_SCORE, UNCALIBRATED
+    from condo_classifier.staff import RESIDENT_CONFIRMED, review_notes
+
+    reasons = [LOW_SCORE, UNCALIBRATED, "Location is missing."]
+    assert review_notes(reasons, "open") == reasons
+    assert review_notes(reasons, "ready") == reasons
+    assert review_notes(reasons, "submitted") == ["Location is missing.", RESIDENT_CONFIRMED]
+    assert review_notes(reasons, "with_staff") == ["Location is missing."]
+    assert review_notes(["Urgent report requires staff triage."], "submitted") == [
+        "Urgent report requires staff triage."
+    ]
+    card = staff_card("R-1", "Jane", result(review_reasons=[LOW_SCORE]), ["x"], "submitted")
+    assert LOW_SCORE not in card
+    assert RESIDENT_CONFIRMED in card

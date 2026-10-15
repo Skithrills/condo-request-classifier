@@ -16,6 +16,11 @@ from condo_classifier.signals import (
 )
 from condo_classifier.taxonomy import LABELS
 
+# Review notes about the model's own uncertainty. A resident confirming the work-order
+# summary resolves these (see staff.review_notes).
+LOW_SCORE = "Model score is below the review threshold."
+UNCALIBRATED = "LLM confidence is not calibrated; staff must confirm the classification."
+
 
 class State(TypedDict, total=False):
     request: ResidentRequest
@@ -95,11 +100,9 @@ class Classifier:
             reasons.append("Request is unclear or outside the supported categories.")
             missing.append("A clearer description of the resident's request")
         if prediction.confidence is not None and prediction.confidence < self.review_threshold:
-            reasons.append("Model score is below the review threshold.")
+            reasons.append(LOW_SCORE)
         if prediction.confidence_kind == "self_reported":
-            reasons.append(
-                "LLM confidence is not calibrated; staff must confirm the classification."
-            )
+            reasons.append(UNCALIBRATED)
         if LABELS[prediction.category].needs_location and not location:
             missing.append("Block, unit or shared-area location")
             reasons.append("Location is missing.")

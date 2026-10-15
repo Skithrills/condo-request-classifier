@@ -72,7 +72,7 @@ from condo_classifier.replies import (
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
 from condo_classifier.signals import safety_signal
-from condo_classifier.staff import new_request_id, resident_label, staff_card
+from condo_classifier.staff import new_request_id, resident_label, review_notes, staff_card
 from condo_classifier.store import RequestRecord, RequestStore, default_store_path
 from condo_classifier.vision import (
     ClaudePhotoDescriber,
@@ -250,7 +250,7 @@ class ResidentBot:
                     team=result.suggested_team,
                     location=result.location,
                     missing_details=result.missing_details,
-                    review_reasons=result.review_reasons,
+                    review_reasons=review_notes(result.review_reasons, conversation.status),
                     messages=conversation.resident_texts,
                     photos=conversation.photos,
                 )
@@ -801,6 +801,11 @@ def build_bot() -> ResidentBot:
         except ValueError as exc:
             raise SystemExit(f"Check .env: {exc}") from exc
     log.info("Photos: %s.", "on" if describer else "off")
+    try:
+        threshold = float(os.getenv("REVIEW_THRESHOLD", "0.60"))
+        classifier = Classifier(backend, review_threshold=threshold)
+    except ValueError as exc:
+        raise SystemExit("REVIEW_THRESHOLD must be a number between 0 and 1.") from exc
     if os.getenv("GROUP_REPLIES", "off") not in {"on", "off"}:
         raise SystemExit("GROUP_REPLIES must be on or off.")
     limit = os.getenv("BOT_TO_BOT_LIMIT", "3")
@@ -809,7 +814,7 @@ def build_bot() -> ResidentBot:
     log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
-        Classifier(backend),
+        classifier,
         chat,
         int(staff_chat_id) if staff_chat_id else None,
         store,

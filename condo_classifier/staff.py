@@ -3,6 +3,7 @@
 import secrets
 
 from condo_classifier.schema import Classification, Priority
+from condo_classifier.service import LOW_SCORE, UNCALIBRATED
 from condo_classifier.taxonomy import LABELS
 
 MAX_CARD_CHARS = 4000  # Telegram allows 4,096
@@ -17,6 +18,22 @@ STATUS_HEADERS = {
     "cancelled": "✖️ Cancelled by resident",
     "ready": "📝 Ready, waiting for resident",
 }
+
+
+# Statuses where the resident has confirmed the summary card or a staff member has the
+# request, so the model's uncertainty about the category no longer needs attention.
+CONFIRMED = {"submitted", "with_staff", "resolved"}
+RESIDENT_CONFIRMED = "✅ Resident confirmed the summary."
+
+
+def review_notes(reasons: list[str], status: str) -> list[str]:
+    """Review notes worth a staff member's attention for a request in this status."""
+    if status not in CONFIRMED:
+        return list(reasons)
+    notes = [r for r in reasons if r not in {LOW_SCORE, UNCALIBRATED}]
+    if len(notes) < len(reasons) and status == "submitted":
+        notes.append(RESIDENT_CONFIRMED)
+    return notes
 
 
 def new_request_id() -> str:
@@ -52,10 +69,11 @@ def staff_card(
     ]
     if result.missing_details:
         lines.append("Still missing: " + "; ".join(result.missing_details))
-    if result.review_reasons:
+    notes = review_notes(result.review_reasons, status)
+    if notes:
         lines.append("")
         lines.append("Review notes:")
-        lines.extend(f"- {reason}" for reason in result.review_reasons)
+        lines.extend(f"- {note}" for note in notes)
     lines.append("")
     lines.append("Resident said:")
     head = "\n".join(lines)
