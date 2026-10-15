@@ -17,7 +17,13 @@ WELCOME = (
 
 NEW_REQUEST = "Okay, starting a new request. What do you need help with?"
 
-TEXT_ONLY = "Please describe your request in a text message. I can't read photos or files yet."
+TEXT_ONLY = "Please send your request as text or a photo. I can't read other files yet."
+
+PHOTO_UNAVAILABLE = "I can't look at photos right now. Please describe the problem in text."
+
+PHOTO_UNREADABLE = "I couldn't make out that photo. Could you describe the problem in text?"
+
+PHOTO_TOO_BIG = "That file is too big for me. Please send it as a normal photo instead."
 
 INVALID = "Please describe your request in words, between 3 and 4,000 characters."
 

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS requests (
     missing_details TEXT NOT NULL,
     review_reasons TEXT NOT NULL,
     messages TEXT NOT NULL,
+    photos TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -47,11 +48,13 @@ class RequestRecord:
     missing_details: list[str] = field(default_factory=list)
     review_reasons: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+    # Paths relative to the store's folder, e.g. "photos/R-1A2B3C/1.jpg".
+    photos: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=now)
     updated_at: str = field(default_factory=now)
 
 
-LIST_FIELDS = ("missing_details", "review_reasons", "messages")
+LIST_FIELDS = ("missing_details", "review_reasons", "messages", "photos")
 
 
 class RequestStore:
@@ -60,6 +63,22 @@ class RequestStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.execute(SCHEMA)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(requests)")}
+            if "photos" not in columns:  # databases created before photo support
+                db.execute("ALTER TABLE requests ADD COLUMN photos TEXT NOT NULL DEFAULT '[]'")
+
+    def save_photo(self, request_id: str, jpeg: bytes) -> str:
+        """Write a photo next to the database and return its relative path."""
+        if not request_id.replace("-", "").isalnum():
+            raise ValueError("Unexpected request ID.")
+        folder = self.path.parent / "photos" / request_id
+        folder.mkdir(parents=True, exist_ok=True)
+        name = f"{len(list(folder.glob('*.jpg'))) + 1}.jpg"
+        (folder / name).write_bytes(jpeg)
+        return f"photos/{request_id}/{name}"
+
+    def photo_path(self, relative: str) -> Path:
+        return self.path.parent / relative
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

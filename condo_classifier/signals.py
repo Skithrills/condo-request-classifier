@@ -14,6 +14,18 @@ class SafetySignal:
 
 EMERGENCY_PATTERNS = (
     (Category.MAINTENANCE, r"\b(?:on fire|flames|smoke (?:is |coming |pouring |in |from ))\b"),
+    # Everyday phrasings: "there's a fire", "fire in the lift lobby", "caught fire".
+    (
+        Category.MAINTENANCE,
+        r"\b(?:there(?:'s| is| are)|i (?:can )?see) (?:a |some )?(?:fire|smoke|flames)\b",
+    ),
+    (Category.MAINTENANCE, r"\bfire (?:in|at|on|inside|near|spreading)\b"),
+    (Category.MAINTENANCE, r"\b(?:caught|catching|catch) fire\b|\b(?:is|are) (?:burning|ablaze)\b"),
+    (
+        Category.MAINTENANCE,
+        r"\b(?:full of|filled with) smoke\b|\bsmoke everywhere\b|"
+        r"\bburning smell\b|\bsmell(?:s|ing)? (?:of )?burning\b",
+    ),
     (Category.MAINTENANCE, r"\b(?:gas leak|smell (?:of )?gas|smelling gas)\b"),
     (
         Category.MAINTENANCE,

@@ -40,6 +40,9 @@ from condo_classifier.replies import (
     INVALID,
     NEW_REQUEST,
     NOT_READY,
+    PHOTO_TOO_BIG,
+    PHOTO_UNAVAILABLE,
+    PHOTO_UNREADABLE,
     STALE,
     SUBMITTED,
     TEXT_ONLY,
@@ -53,6 +56,12 @@ from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
 from condo_classifier.staff import new_request_id, resident_label, staff_card
 from condo_classifier.store import RequestRecord, RequestStore, default_store_path
+from condo_classifier.vision import (
+    ClaudePhotoDescriber,
+    PhotoDescriber,
+    photo_message,
+    prepare_image,
+)
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +75,11 @@ REACTIONS = {
 }
 
 
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
+# Saved copies for staff: big enough to see small defects, small enough to keep.
+SAVED_PHOTO_EDGE = 2048
+
+
 class ResidentBot:
     def __init__(
         self,
@@ -73,11 +87,13 @@ class ResidentBot:
         chat: ResidentChat | None = None,
         staff_chat_id: int | None = None,
         store: RequestStore | None = None,
+        describer: PhotoDescriber | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
         self.staff_chat_id = staff_chat_id
         self.store = store
+        self.describer = describer
         self.conversations: dict[int, Conversation] = {}
         self.locks: dict[int, asyncio.Lock] = {}
 
@@ -142,6 +158,10 @@ class ResidentBot:
         if self.store is None or not self.worth_tracking(conversation):
             return
         try:
+            # Photos are written only once a request is worth tracking.
+            while conversation.pending_photos:
+                jpeg = conversation.pending_photos.pop(0)
+                conversation.photos.append(self.store.save_photo(conversation.request_id, jpeg))
             self.store.save(
                 RequestRecord(
                     id=conversation.request_id,
@@ -155,6 +175,7 @@ class ResidentBot:
                     missing_details=result.missing_details,
                     review_reasons=result.review_reasons,
                     messages=conversation.resident_texts,
+                    photos=conversation.photos,
                 )
             )
         except Exception:
@@ -195,7 +216,26 @@ class ResidentBot:
             pass
 
     async def notify_staff(self, bot: Bot, conversation: Conversation, fresh=False) -> None:
-        """Post or update this request's card in the staff chat. Never blocks the resident."""
+        """Post or update this request's card in the staff chat, then any new photos under
+        it. Never blocks the resident."""
+        await self.post_card(bot, conversation, fresh)
+        if self.staff_chat_id is None or self.store is None:
+            return
+        while conversation.staff_photos_sent < len(conversation.photos):
+            relative = conversation.photos[conversation.staff_photos_sent]
+            conversation.staff_photos_sent += 1
+            try:
+                with self.store.photo_path(relative).open("rb") as photo:
+                    await bot.send_photo(
+                        self.staff_chat_id,
+                        photo,
+                        caption=f"📷 {conversation.request_id}",
+                        reply_to_message_id=conversation.staff_message_id,
+                    )
+            except (OSError, TelegramError) as exc:
+                log.warning("Could not send a photo to staff: %s", type(exc).__name__)
+
+    async def post_card(self, bot: Bot, conversation: Conversation, fresh=False) -> None:
         result = conversation.last_result
         if self.staff_chat_id is None or not self.worth_tracking(conversation):
             return
@@ -241,7 +281,6 @@ class ResidentBot:
     async def text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = update.effective_message
         chat_id = update.effective_chat.id
-        bot = context.bot
         # One message at a time per chat so the conversation history stays in order.
         async with self.lock(chat_id):
             existing = self.conversations.get(chat_id)
@@ -250,32 +289,77 @@ class ResidentBot:
                 # Greetings, and "thanks" after a submitted request, don't open a request.
                 await message.reply_text(canned)
                 return
-            await bot.send_chat_action(chat_id, "typing")
-            conversation = self.conversation(chat_id)
-            user = update.effective_user
-            conversation.resident = resident_label(user.full_name, user.username, user.id)
-            conversation.last_resident_message_id = message.message_id
-            previous = conversation.last_result
+            await context.bot.send_chat_action(chat_id, "typing")
+            await self.respond(update, context, message.text)
+
+    async def photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """A photo (or an image sent as a file) becomes a described turn in the conversation."""
+        message = update.effective_message
+        chat_id = update.effective_chat.id
+        if self.describer is None:
+            await message.reply_text(PHOTO_UNAVAILABLE)
+            return
+        media = message.photo[-1] if message.photo else message.document
+        if media.file_size and media.file_size > MAX_PHOTO_BYTES:
+            await message.reply_text(PHOTO_TOO_BIG)
+            return
+        async with self.lock(chat_id):
+            await context.bot.send_chat_action(chat_id, "typing")
             try:
-                # The classifier and Claude client are synchronous.
-                reply = await asyncio.to_thread(self.reply_for, chat_id, message.text)
+                data = bytes(await (await media.get_file()).download_as_bytearray())
+                jpeg = await asyncio.to_thread(prepare_image, data, SAVED_PHOTO_EDGE)
             except Exception:
-                log.exception("Reply failed")
-                reply = UNAVAILABLE
-            conversation = self.conversations.get(chat_id)
-            classified = conversation is not None and conversation.last_result is not previous
-            if not classified or conversation.last_result.status == "provider_error":
-                await self.react(bot, chat_id, message.message_id, "problem")
-                await message.reply_text(reply)
+                log.warning("Could not download or read a photo")
+                jpeg = None
+            caption = message.caption
+            description = None
+            if jpeg is not None:
+                description = await asyncio.to_thread(self.describer.describe, jpeg, caption)
+            if description is None:
+                await self.react(context.bot, chat_id, message.message_id, "problem")
+                await message.reply_text(PHOTO_UNREADABLE)
                 return
-            if conversation.status == "ready":
-                reply = f"{reply}\n\n{work_order_summary(conversation.last_result)}"
-            await self.clear_buttons(bot, chat_id, conversation)
-            sent = await message.reply_text(reply, reply_markup=self.keyboard(conversation))
-            if self.keyboard(conversation) is not None:
-                conversation.buttons_message_id = sent.message_id
-            await self.react(bot, chat_id, message.message_id, conversation.status)
-            await self.notify_staff(bot, conversation)
+            log.info("Photo described (%d chars)", len(description))
+            await self.respond(update, context, photo_message(description, caption), jpeg)
+
+    async def respond(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        text: str,
+        photo: bytes | None = None,
+    ) -> None:
+        """Classify a resident turn, reply, and update the staff card. Caller holds the lock."""
+        message = update.effective_message
+        chat_id = update.effective_chat.id
+        bot = context.bot
+        conversation = self.conversation(chat_id)
+        if photo is not None:
+            conversation.pending_photos.append(photo)
+        user = update.effective_user
+        conversation.resident = resident_label(user.full_name, user.username, user.id)
+        conversation.last_resident_message_id = message.message_id
+        previous = conversation.last_result
+        try:
+            # The classifier and Claude client are synchronous.
+            reply = await asyncio.to_thread(self.reply_for, chat_id, text)
+        except Exception:
+            log.exception("Reply failed")
+            reply = UNAVAILABLE
+        conversation = self.conversations.get(chat_id)
+        classified = conversation is not None and conversation.last_result is not previous
+        if not classified or conversation.last_result.status == "provider_error":
+            await self.react(bot, chat_id, message.message_id, "problem")
+            await message.reply_text(reply)
+            return
+        if conversation.status == "ready":
+            reply = f"{reply}\n\n{work_order_summary(conversation.last_result)}"
+        await self.clear_buttons(bot, chat_id, conversation)
+        sent = await message.reply_text(reply, reply_markup=self.keyboard(conversation))
+        if self.keyboard(conversation) is not None:
+            conversation.buttons_message_id = sent.message_id
+        await self.react(bot, chat_id, message.message_id, conversation.status)
+        await self.notify_staff(bot, conversation)
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -363,6 +447,9 @@ class ResidentBot:
         app.add_handler(CommandHandler("new", self.new, filters=private))
         app.add_handler(CommandHandler(["human", "person"], self.human, filters=private))
         app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, self.text))
+        app.add_handler(
+            MessageHandler(private & (filters.PHOTO | filters.Document.IMAGE), self.photo)
+        )
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         app.add_handler(CallbackQueryHandler(self.button, pattern=r"^(submit|cancel|human):"))
         # CommandHandler ignores channel posts, so match /chatid as text to cover channels.
@@ -399,10 +486,21 @@ def build_bot() -> ResidentBot:
             "Add the bot to the staff group and send /chatid there to get the ID."
         )
     store = RequestStore(default_store_path())
+    describer = None
+    if os.getenv("PHOTOS", "on") == "on" and os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            describer = ClaudePhotoDescriber.from_env()
+        except ValueError as exc:
+            raise SystemExit(f"Check .env: {exc}") from exc
+    log.info("Photos: %s.", "on" if describer else "off")
     log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
-        Classifier(backend), chat, int(staff_chat_id) if staff_chat_id else None, store
+        Classifier(backend),
+        chat,
+        int(staff_chat_id) if staff_chat_id else None,
+        store,
+        describer,
     )
 
 

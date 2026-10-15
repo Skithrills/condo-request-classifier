@@ -44,7 +44,8 @@ def requests_view() -> None:
     if not path.exists():
         st.info("No requests yet. Start the bot and message it on Telegram.")
         return
-    records = RequestStore(path).all()
+    store = RequestStore(path)
+    records = store.all()
     if not records:
         st.info("No requests yet. Start the bot and message it on Telegram.")
         return
@@ -85,6 +86,7 @@ def requests_view() -> None:
                 "Priority": r.priority,
                 "Team": r.team,
                 "Location": r.location or "—",
+                "📷": len(r.photos) or "",
                 "Resident": r.resident,
                 "Updated": when(r.updated_at),
             }
@@ -110,6 +112,13 @@ def requests_view() -> None:
             for text in r.messages:
                 # Plain text: resident messages are untrusted and must not render as markdown.
                 st.text(text)
+            if r.photos:
+                st.write(f"**Photos ({len(r.photos)}):**")
+                columns = st.columns(min(len(r.photos), 3))
+                for index, relative in enumerate(r.photos):
+                    photo = store.photo_path(relative)
+                    if photo.exists():
+                        columns[index % len(columns)].image(str(photo))
             st.caption(f"Opened {when(r.created_at)} · updated {when(r.updated_at)}")
 
 

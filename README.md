@@ -275,6 +275,15 @@ Emergencies always get the fixed safety text, never generated wording. The bot
 cannot approve, book or pay for anything. Greetings and a closing "thanks" get a
 quick canned reply and never open a request.
 
+**Photos.** Residents can send a photo (with or without a caption) or an image file.
+Claude Haiku 5.5 describes it in a sentence or two, and the description joins the
+conversation as `[Photo: ...]`, so the classifier, safety screen, chat, staff card and
+dashboard all use it like text. Photos over `IMAGE_MAX_EDGE` pixels are shrunk first,
+which loses nothing the model would see. Saved copies go next to the request database
+(`data/private/photos/`), are posted under the staff card, and appear on the dashboard.
+Photos are saved only once a request is understood. For off-topic photos the offline
+baseline classifier can guess a category; `CLASSIFIER_BACKEND=claude` reads them better.
+
 **Buttons.** While the bot is still asking for details there are no buttons. Once a
 request has everything it needs, the bot shows a 📋 work-order summary with
 **✅ Submit**, **✖️ Cancel** and **🙋 Talk to a person**. Residents can also send

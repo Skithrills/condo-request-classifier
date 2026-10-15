@@ -19,7 +19,9 @@ log = logging.getLogger(__name__)
 SYSTEM = (
     "You are the resident assistant for a condominium management office, chatting with "
     "residents on Telegram. After each resident message you get a system note with the "
-    "request classifier's reading of the conversation so far.\n\n"
+    "request classifier's reading of the conversation so far. A resident turn may contain "
+    "[Photo: ...], an automatic description of a photo they sent; treat it as what they "
+    "showed you, and don't ask for details the photo already answers.\n\n"
     "Style: very short, like a friendly text message. One or two sentences, under 30 words. "
     "Plain text, no markdown, no lists, no sign-offs. Reply in the resident's language.\n\n"
     "What to do:\n"
@@ -68,6 +70,10 @@ class Conversation:
     # bot message whose buttons are still live.
     last_resident_message_id: int | None = None
     buttons_message_id: int | None = None
+    # Photos: JPEG bytes waiting until the request is tracked, then saved relative paths.
+    pending_photos: list[bytes] = field(default_factory=list)
+    photos: list[str] = field(default_factory=list)
+    staff_photos_sent: int = 0
 
     def request_text(self) -> str:
         """Everything the resident has said, newest last, within the request size limit."""
