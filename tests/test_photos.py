@@ -148,6 +148,8 @@ def test_photos_are_saved_next_to_the_database(tmp_path):
 # Bot flow -----------------------------------------------------------------------------
 
 telegram = pytest.importorskip("telegram")
+from telegram.error import Forbidden  # noqa: E402
+
 from condo_classifier.telegram_bot import ResidentBot  # noqa: E402
 
 USER = SimpleNamespace(full_name="Jane Tan", username="janet", id=42)
@@ -302,3 +304,72 @@ def test_delete_removes_request_and_photos(tmp_path):
     assert not (tmp_path / "photos" / "R-DEL1").exists()
     assert [r.id for r in store.all()] == ["R-KEEP"]
     assert store.delete("R-DEL1") is False
+
+
+def test_old_database_gains_resident_columns(tmp_path):
+    from condo_classifier.store import RequestRecord
+
+    path = tmp_path / "requests.db"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE requests (id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, "
+            "resident TEXT NOT NULL, status TEXT NOT NULL, category TEXT NOT NULL, "
+            "priority TEXT NOT NULL, team TEXT NOT NULL, location TEXT, "
+            "missing_details TEXT NOT NULL, review_reasons TEXT NOT NULL, "
+            "messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+    db.close()
+    store = RequestStore(path)
+    store.save(
+        RequestRecord(
+            "R-1",
+            1,
+            "Jane",
+            "open",
+            "noise",
+            "normal",
+            "T",
+            None,
+            user_id=9,
+            resident_name="Jane",
+            username="jt",
+        )
+    )
+    saved = store.get("R-1")
+    assert (saved.user_id, saved.resident_name, saved.username, saved.photos) == (
+        9,
+        "Jane",
+        "jt",
+        [],
+    )
+
+
+def test_bot_saves_profile_photo_once(baseline, tmp_path):
+    store = RequestStore(tmp_path / "requests.db")
+    bot = ResidentBot(Classifier(baseline), FakeChat(), None, store, FakeDescriber())
+    small = SimpleNamespace(
+        width=160,
+        get_file=AsyncMock(
+            return_value=SimpleNamespace(
+                download_as_bytearray=AsyncMock(return_value=bytearray(jpeg(640, 640)))
+            )
+        ),
+    )
+    tg = SimpleNamespace(
+        get_user_profile_photos=AsyncMock(
+            return_value=SimpleNamespace(total_count=1, photos=[[SimpleNamespace(width=80), small]])
+        )
+    )
+    user = SimpleNamespace(id=42)
+    asyncio.run(bot.fetch_avatar(tg, user))
+    asyncio.run(bot.fetch_avatar(tg, user))
+    assert size(store.avatar_path(42).read_bytes()) == (256, 256)
+    tg.get_user_profile_photos.assert_awaited_once()
+    # Hidden photo or an API error: no avatar, no crash.
+    hidden = SimpleNamespace(
+        get_user_profile_photos=AsyncMock(return_value=SimpleNamespace(total_count=0, photos=[]))
+    )
+    asyncio.run(bot.fetch_avatar(hidden, SimpleNamespace(id=43)))
+    broken = SimpleNamespace(get_user_profile_photos=AsyncMock(side_effect=Forbidden("nope")))
+    asyncio.run(bot.fetch_avatar(broken, SimpleNamespace(id=44)))
+    assert store.avatar_path(43) is None and store.avatar_path(44) is None

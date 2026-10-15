@@ -165,6 +165,7 @@ class ResidentBot:
         # Staff-group message IDs (cards, photos, forwarded messages) -> resident conversation,
         # so a staff member's reply reaches the right resident.
         self.staff_threads: dict[int, Key] = {}
+        self.avatars_checked: set[int] = set()
 
     def conversation(self, key: Key) -> Conversation:
         conversation = self.conversations.get(key)
@@ -253,6 +254,9 @@ class ResidentBot:
                     review_reasons=review_notes(result.review_reasons, conversation.status),
                     messages=conversation.resident_texts,
                     photos=conversation.photos,
+                    user_id=conversation.user_id,
+                    resident_name=conversation.resident_name,
+                    username=conversation.username,
                 )
             )
             conversation.saved = True
@@ -346,6 +350,28 @@ class ResidentBot:
             log.info("Staff card %s posted", conversation.request_id)
         except TelegramError as exc:
             log.warning("Could not post to the staff chat: %s", type(exc).__name__)
+
+    async def fetch_avatar(self, bot: Bot, user: User) -> None:
+        """Save the resident's Telegram profile photo for the dashboard, once per run.
+
+        Telegram only returns it when the resident's privacy settings allow; otherwise the
+        dashboard shows their initials.
+        """
+        if self.store is None or user.id in self.avatars_checked:
+            return
+        self.avatars_checked.add(user.id)
+        try:
+            photos = await bot.get_user_profile_photos(user.id, limit=1)
+            if not photos.total_count:
+                return
+            # Sizes run small to large; take the first one at least 160px wide.
+            sizes = photos.photos[0]
+            size = next((s for s in sizes if s.width >= 160), sizes[-1])
+            data = bytes(await (await size.get_file()).download_as_bytearray())
+            jpeg = await asyncio.to_thread(prepare_image, data, 256)
+            self.store.save_avatar(user.id, jpeg)
+        except Exception as exc:  # an avatar is never worth failing a reply over
+            log.info("No profile photo saved: %s", type(exc).__name__)
 
     def lock(self, key: Key) -> asyncio.Lock:
         return self.locks.setdefault(key, asyncio.Lock())
@@ -617,6 +643,9 @@ class ResidentBot:
             conversation.pending_photos.append(photo)
         user = update.effective_user
         conversation.resident = resident_label(user.full_name, user.username, user.id)
+        conversation.user_id = user.id
+        conversation.resident_name = user.full_name
+        conversation.username = user.username
         conversation.last_resident_message_id = message.message_id
         previous = conversation.last_result
         try:
@@ -639,6 +668,8 @@ class ResidentBot:
             conversation.buttons_message_id = sent.message_id
         await self.react(bot, chat_id, message.message_id, conversation.status)
         await self.notify_staff(bot, conversation)
+        if self.worth_tracking(conversation):
+            await self.fetch_avatar(bot, user)
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

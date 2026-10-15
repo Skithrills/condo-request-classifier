@@ -353,8 +353,13 @@ when a person addresses it.
 
 Requests are saved to `data/private/requests.db` (gitignored; change it with
 `REQUESTS_DB`). With the bot running, double-click **`run_dashboard.cmd`** (or run
-`./run_dashboard.sh`) and open http://localhost:8502. It shows counts per status,
-filters, search and each request's details, and refreshes every 10 seconds. Tick rows in
+`./run_dashboard.sh`) and open http://localhost:8502. An overview panel shows what
+needs attention, new work orders, requests with staff or still with the bot, and the
+queue's status mix. Below it, each request is a card with the resident's Telegram
+profile photo (when their privacy settings allow; initials otherwise), status,
+category, location, team and latest message, with the full conversation, notes and
+photos one click away. Filters sit in the sidebar and the page refreshes every 15
+seconds (pause it with Live refresh while deleting). Tick rows in
 the table and press 🗑️ **Delete selected** (or use Delete inside a request's details);
 after a confirmation it removes the requests and their photos; the bot won't save a deleted request again if that resident keeps chatting.
 Run it on the same machine as the bot.

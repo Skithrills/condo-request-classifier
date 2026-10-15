@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS requests (
     review_reasons TEXT NOT NULL,
     messages TEXT NOT NULL,
     photos TEXT NOT NULL DEFAULT '[]',
+    user_id INTEGER,
+    resident_name TEXT,
+    username TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -59,11 +62,21 @@ class RequestRecord:
     messages: list[str] = field(default_factory=list)
     # Paths relative to the store's folder, e.g. "photos/R-1A2B3C/1.jpg".
     photos: list[str] = field(default_factory=list)
+    # The resident's Telegram account, kept separately for the dashboard (avatars, handles).
+    user_id: int | None = None
+    resident_name: str | None = None
+    username: str | None = None
     created_at: str = field(default_factory=now)
     updated_at: str = field(default_factory=now)
 
 
 LIST_FIELDS = ("missing_details", "review_reasons", "messages", "photos")
+ADDED_COLUMNS = {
+    "photos": "TEXT NOT NULL DEFAULT '[]'",
+    "user_id": "INTEGER",
+    "resident_name": "TEXT",
+    "username": "TEXT",
+}
 
 
 class RequestStore:
@@ -73,8 +86,10 @@ class RequestStore:
         with self._connect() as db:
             db.execute(SCHEMA)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(requests)")}
-            if "photos" not in columns:  # databases created before photo support
-                db.execute("ALTER TABLE requests ADD COLUMN photos TEXT NOT NULL DEFAULT '[]'")
+            # Columns added after the first release; older databases gain them on start.
+            for name, ddl in ADDED_COLUMNS.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE requests ADD COLUMN {name} {ddl}")
 
     def save_photo(self, request_id: str, jpeg: bytes) -> str:
         """Write a photo next to the database and return its relative path."""
@@ -96,6 +111,18 @@ class RequestStore:
                 photo.unlink()
             folder.rmdir()
         return bool(deleted)
+
+    def save_avatar(self, user_id: int, jpeg: bytes) -> None:
+        folder = self.path.parent / "avatars"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{int(user_id)}.jpg").write_bytes(jpeg)
+
+    def avatar_path(self, user_id: int | None) -> Path | None:
+        """The resident's saved Telegram profile photo, if the bot could fetch one."""
+        if user_id is None:
+            return None
+        path = self.path.parent / "avatars" / f"{int(user_id)}.jpg"
+        return path if path.exists() else None
 
     def photo_path(self, relative: str) -> Path:
         return self.path.parent / relative

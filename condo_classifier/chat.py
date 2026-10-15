@@ -78,6 +78,10 @@ class Conversation:
     # has taken over: while they have, the AI stays quiet and messages go to staff.
     key: object = None
     human_active: bool = False
+    # The resident's Telegram account, for the dashboard.
+    user_id: int | None = None
+    resident_name: str | None = None
+    username: str | None = None
     # Store bookkeeping: saved at least once, and whether staff have since deleted it.
     saved: bool = False
     deleted: bool = False
