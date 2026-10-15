@@ -15,10 +15,19 @@ STATUSES = (
     "submitted",
     "needs_human",
     "with_staff",
+    "in_progress",
     "resolved",
     "emergency",
     "cancelled",
 )
+
+# What staff can set from the dashboard: Open (a work order nobody has picked up yet),
+# In progress and Done. Each maps to a stored status.
+STAFF_STATUSES = {"submitted": "Open", "in_progress": "In progress", "resolved": "Done"}
+# Statuses only staff set. The bot's routine statuses don't overwrite them, so a resident's
+# follow-up message can't undo a staff change; an emergency or a request for a person still can.
+STAFF_SET = {"in_progress", "resolved"}
+ROUTINE = {"open", "ready", "submitted"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -154,6 +163,18 @@ class RequestStore:
                 f"ON CONFLICT(id) DO UPDATE SET {updates}",
                 row,
             )
+
+    def set_status(self, request_id: str, status: str) -> bool:
+        """Change only a request's status, as staff do from the dashboard. Returns False if
+        the request no longer exists."""
+        if status not in STATUSES:
+            raise ValueError(f"Unknown status: {status}")
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE requests SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now(), request_id),
+            ).rowcount
+        return bool(changed)
 
     def get(self, request_id: str) -> RequestRecord | None:
         with self._connect() as db:

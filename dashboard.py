@@ -20,7 +20,12 @@ from dotenv import load_dotenv
 
 from condo_classifier.icons import icon
 from condo_classifier.schema import Category
-from condo_classifier.store import RequestRecord, RequestStore, default_store_path
+from condo_classifier.store import (
+    STAFF_STATUSES,
+    RequestRecord,
+    RequestStore,
+    default_store_path,
+)
 from condo_classifier.taxonomy import LABELS
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -33,6 +38,7 @@ STATUS = {
     "emergency": ("Emergency", "siren", "#B42318", "#FEE4E2"),
     "needs_human": ("Wants a person", "hand", "#B54708", "#FEF0C7"),
     "with_staff": ("With staff", "headset", "#175CD3", "#D1E9FF"),
+    "in_progress": ("In progress", "refresh-cw", "#175CD3", "#D1E9FF"),
     "submitted": ("New work order", "send", "#0E6E55", "#D3F2E6"),
     "ready": ("Awaiting resident", "clipboard-list", "#5925DC", "#EBE9FE"),
     "open": ("In conversation", "message-circle", "#475467", "#EEF1F4"),
@@ -46,7 +52,7 @@ STATUS_ORDER = list(STATUS)
 GROUPS = [
     ("Needs attention", {"emergency", "needs_human"}, "#D92D20"),
     ("New work orders", {"submitted"}, "#12917A"),
-    ("With staff", {"with_staff"}, "#2E90FA"),
+    ("With staff", {"with_staff", "in_progress"}, "#2E90FA"),
     ("With the bot", {"open", "ready"}, "#98A2B3"),
     ("Resolved", {"resolved"}, "#A6D8BF"),
 ]
@@ -231,7 +237,7 @@ def overview(records: list[RequestRecord]) -> str:
     feet = [
         f"{count['emergency']} emergency · oldest {ago(oldest)}" if oldest else "Nothing urgent",
         "Submitted by residents",
-        "Replying in Telegram",
+        f"{count['in_progress']} in progress",
         f"{count['ready']} waiting for Submit",
         f"{resolved_today} today",
     ]
@@ -274,8 +280,39 @@ def bars(title: str, title_icon: str, counts: Counter, label, row_icon) -> str:
     return f'<div class="ma-panel-title">{icon(title_icon, 16, BRAND)}{title}</div>{body}'
 
 
+def change_status(store: RequestStore, request_ids: list[str], status: str) -> None:
+    """Set a status from the dashboard and say how it went."""
+    changed = sum(store.set_status(request_id, status) for request_id in request_ids)
+    label = STAFF_STATUSES[status]
+    if changed:
+        st.toast(f"Marked {changed} request(s) {label.lower()}", icon=":material/check:")
+    else:
+        st.toast("That request no longer exists", icon=":material/info:")
+
+
+def status_control(store: RequestStore, r: RequestRecord) -> None:
+    """Open, In progress or Done for one request. The key carries the current status, so
+    when the bot or a colleague changes it the control starts from the new value."""
+    key = f"status-{r.id}-{r.status}"
+
+    def apply() -> None:
+        picked = st.session_state.get(key)
+        if picked and picked != r.status:
+            change_status(store, [r.id], picked)
+
+    st.segmented_control(
+        "Status",
+        list(STAFF_STATUSES),
+        default=r.status if r.status in STAFF_STATUSES else None,
+        format_func=STAFF_STATUSES.get,
+        key=key,
+        on_change=apply,
+    )
+
+
 def details(store: RequestStore, r: RequestRecord) -> None:
     _, username, user_id = resident_parts(r)
+    status_control(store, r)
     left, right = st.columns([3, 2], gap="large")
     with left:
         st.markdown("**Conversation**")
@@ -362,6 +399,12 @@ def table_view(store: RequestStore, shown: list[RequestRecord]) -> None:
     )
     selected = [shown[i].id for i in picked.selection.rows if i < len(shown)]
     if selected:
+        with st.popover(f"Set status of {len(selected)} selected", icon=":material/edit:"):
+            for status, label in STAFF_STATUSES.items():
+                # Keyed to the exact IDs, like delete below.
+                if st.button(label, key=f"set-{status}-" + "-".join(selected), width="stretch"):
+                    change_status(store, selected, status)
+                    st.rerun(scope="fragment")
         with st.popover(
             f"Delete {len(selected)} selected", icon=":material/delete:", type="primary"
         ):
@@ -374,7 +417,7 @@ def table_view(store: RequestStore, shown: list[RequestRecord]) -> None:
                 st.toast(f"Deleted {len(selected)} request(s)", icon=":material/delete:")
                 st.rerun(scope="fragment")
     else:
-        st.caption("Tick rows (left edge) to delete several requests at once.")
+        st.caption("Tick rows (left edge) to change the status of or delete several requests.")
 
 
 def header(live: bool) -> None:

@@ -73,7 +73,13 @@ from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
 from condo_classifier.signals import safety_signal
 from condo_classifier.staff import new_request_id, resident_label, review_notes, staff_card
-from condo_classifier.store import RequestRecord, RequestStore, default_store_path
+from condo_classifier.store import (
+    ROUTINE,
+    STAFF_SET,
+    RequestRecord,
+    RequestStore,
+    default_store_path,
+)
 from condo_classifier.vision import (
     ClaudePhotoDescriber,
     PhotoDescriber,
@@ -228,7 +234,8 @@ class ResidentBot:
         if self.store is None or not self.worth_tracking(conversation):
             return
         try:
-            if conversation.saved and self.store.get(conversation.request_id) is None:
+            stored = self.store.get(conversation.request_id) if conversation.saved else None
+            if conversation.saved and stored is None:
                 # Staff deleted it on the dashboard; don't bring it back.
                 conversation.deleted = True
                 conversation.pending_photos.clear()
@@ -236,6 +243,9 @@ class ResidentBot:
                     "Request %s was deleted by staff; not saving it again", conversation.request_id
                 )
                 return
+            if stored is not None and stored.status in STAFF_SET and conversation.status in ROUTINE:
+                # Staff moved it on the dashboard; a routine update doesn't move it back.
+                conversation.status = stored.status
             # Photos are written only once a request is worth tracking.
             while conversation.pending_photos:
                 jpeg = conversation.pending_photos.pop(0)
