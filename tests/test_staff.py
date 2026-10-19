@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from condo_classifier.chat import ResidentMessage
 from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.service import Classifier
 from condo_classifier.staff import MAX_CARD_CHARS, resident_label, staff_card
@@ -40,8 +41,14 @@ def result(**changes):
     )
 
 
+def said(*texts):
+    return [ResidentMessage(text, text) for text in texts]
+
+
 def test_card_has_routing_details_and_resident_messages():
-    card = staff_card("R-ABC123", resident_label("Jane Tan", "janet", 42), result(), ["Hi", "Help"])
+    card = staff_card(
+        "R-ABC123", resident_label("Jane Tan", "janet", 42), result(), said("Hi", "Help")
+    )
     assert card.startswith("🆕 Request · R-ABC123")
     assert "From: Jane Tan @janet (Telegram ID 42)" in card
     assert "Team: Maintenance team" in card
@@ -60,11 +67,11 @@ def test_card_has_routing_details_and_resident_messages():
     ],
 )
 def test_card_headers(changes, header):
-    assert staff_card("R-1", "Jane", result(**changes), ["x"]).startswith(header)
+    assert staff_card("R-1", "Jane", result(**changes), said("x")).startswith(header)
 
 
 def test_card_keeps_newest_text_within_telegram_limit():
-    card = staff_card("R-1", "Jane", result(), ["old " * 1200, "newest message"])
+    card = staff_card("R-1", "Jane", result(), said("old " * 1200, "newest message"))
     assert len(card) <= MAX_CARD_CHARS
     assert card.endswith("> newest message")
     assert "…" in card
@@ -166,3 +173,73 @@ def test_invalid_staff_chat_id_rejected(monkeypatch):
     monkeypatch.setenv("STAFF_CHAT_ID", "@staffgroup")
     with pytest.raises(SystemExit, match="STAFF_CHAT_ID must be a number"):
         build_bot()
+
+
+def test_card_shows_language_translation_and_voice():
+    messages = [
+        ResidentMessage("5座电梯坏了", "The lift at Block 5 is broken", voice=True),
+        ResidentMessage("#05-12", "#05-12"),
+    ]
+    card = staff_card("R-1", "Jane", result(), messages, language="zh")
+    assert "Language: Chinese (translated to English below)" in card
+    assert card.endswith("> 🎙️ 5座电梯坏了\n  EN: The lift at Block 5 is broken\n> #05-12")
+    assert "could not be translated" in staff_card(
+        "R-1", "Jane", result(), messages, translation_failed=True
+    )
+
+
+class FakeTranscriber:
+    def __init__(self, text=None):
+        self.text = text
+
+    def transcribe(self, audio):
+        from condo_classifier.voice import TranscriptionError
+
+        if self.text is None:
+            raise TranscriptionError("down")
+        assert audio == b"ogg"
+        return self.text
+
+
+def send_voice(bot, staff_bot, chat_id, duration=5):
+    file = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=bytearray(b"ogg")))
+    voice = SimpleNamespace(
+        duration=duration, file_id="voice-file-1", get_file=AsyncMock(return_value=file)
+    )
+    message = SimpleNamespace(voice=voice, reply_text=AsyncMock())
+    update = SimpleNamespace(
+        effective_message=message,
+        effective_chat=SimpleNamespace(id=chat_id),
+        effective_user=USER,
+    )
+    asyncio.run(bot.voice(update, SimpleNamespace(bot=staff_bot)))
+    return [call.args[0] for call in message.reply_text.call_args_list]
+
+
+def test_voice_note_is_echoed_classified_and_forwarded(baseline):
+    bot = ResidentBot(
+        Classifier(baseline),
+        staff_chat_id=STAFF,
+        transcriber=FakeTranscriber("The light keeps flickering outside #05-12"),
+    )
+    staff_bot = fake_bot()
+    staff_bot.send_voice = AsyncMock()
+    heard, reply = send_voice(bot, staff_bot, 1)
+    assert heard == "🎙️ I heard: The light keeps flickering outside #05-12"
+    assert "Maintenance" in reply
+    assert bot.conversations[1].said[0].voice
+    assert "> 🎙️ The light keeps flickering" in staff_bot.send_message.call_args.args[1]
+    forwarded = staff_bot.send_voice.call_args
+    assert forwarded.args == (STAFF, "voice-file-1")
+    assert forwarded.kwargs["reply_parameters"].message_id == 7
+
+
+def test_unclear_or_long_voice_notes_get_a_plain_answer(baseline):
+    bot = ResidentBot(Classifier(baseline), staff_chat_id=STAFF, transcriber=FakeTranscriber())
+    staff_bot = fake_bot()
+    assert "couldn't make out" in send_voice(bot, staff_bot, 1)[0]
+    assert "under 120 seconds" in send_voice(bot, staff_bot, 1, duration=300)[0]
+    bot.transcriber = FakeTranscriber("should not be called")
+    assert "couldn't make out" in send_voice(bot, staff_bot, 1, duration=0)[0]
+    staff_bot.send_message.assert_not_awaited()
+    assert 1 not in bot.conversations

@@ -5,7 +5,13 @@ import anthropic
 import httpx2
 import pytest
 
-from condo_classifier.chat import MAX_MESSAGES, Conversation, ResidentChat, classifier_note
+from condo_classifier.chat import (
+    MAX_MESSAGES,
+    Conversation,
+    ResidentChat,
+    ResidentMessage,
+    classifier_note,
+)
 from condo_classifier.schema import Category, Classification, Priority
 
 
@@ -100,5 +106,14 @@ def test_failures_return_none_without_recording(chat, outcome):
 
 
 def test_request_text_keeps_the_newest_4000_characters():
-    conversation = Conversation(resident_texts=["a" * 3000, "b" * 3000])
+    conversation = Conversation(said=[ResidentMessage(t, t) for t in ["a" * 3000, "b" * 3000]])
     assert conversation.request_text() == "a" * 999 + "\n" + "b" * 3000
+    assert conversation.original_text() is None
+
+
+def test_original_text_only_when_something_was_translated():
+    conversation = Conversation(
+        said=[ResidentMessage("#05-12", "#05-12"), ResidentMessage("灯坏了", "The light is broken")]
+    )
+    assert conversation.request_text() == "#05-12\nThe light is broken"
+    assert conversation.original_text() == "#05-12\n灯坏了"

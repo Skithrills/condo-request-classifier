@@ -10,4 +10,8 @@ if [ ! -f .env ]; then
     echo "Created .env. Fill in TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY, then run ./run_bot.sh again."
     exit 0
 fi
-exec uv run --locked --extra telegram python -m condo_classifier.telegram_bot
+extras="--extra telegram"
+if grep -Eq '^TRANSCRIBE_WITH=.*local' .env; then
+    extras="$extras --extra voice-local"
+fi
+exec uv run --locked $extras python -m condo_classifier.telegram_bot

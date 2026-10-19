@@ -148,3 +148,86 @@ def test_build_bot_explains_missing_setup(monkeypatch, env, message):
         monkeypatch.setenv(key, value)
     with pytest.raises(SystemExit, match=message):
         build_bot()
+
+
+class FakeTranslator:
+    """Looks words up instead of calling a model. Unknown text counts as English."""
+
+    def __init__(self, table=None, fail=False):
+        self.table = table or {}
+        self.fail = fail
+
+    def translate(self, text):
+        from condo_classifier.language import Translation, TranslationError
+
+        if self.fail:
+            raise TranslationError("down")
+        if text in self.table:
+            return Translation(*self.table[text])
+        return Translation("en", text)
+
+
+CHINESE = {
+    "5座走廊的灯一直闪": ("zh", "The corridor light at Block 5 keeps flickering"),
+    "垃圾槽冒出很多烟！": ("zh", "A lot of smoke is coming from the rubbish chute!"),
+}
+
+
+def test_other_languages_are_classified_in_english(baseline):
+    pytest.importorskip("telegram")
+    from condo_classifier.telegram_bot import ResidentBot
+
+    chat = FakeChat()
+    bot = ResidentBot(Classifier(baseline), chat, translator=FakeTranslator(CHINESE))
+    assert bot.reply_for(1, "5座走廊的灯一直闪") == chat.answer
+    conversation = bot.conversations[1]
+    assert conversation.language == "zh"
+    assert conversation.request_text() == "The corridor light at Block 5 keeps flickering"
+    text, result = chat.calls[0]
+    assert text == "5座走廊的灯一直闪"  # Claude replies to the resident's own words.
+    assert result.category == Category.MAINTENANCE
+    assert any("Translated" in reason for reason in result.review_reasons)
+
+
+def test_emergency_reply_in_the_residents_language(baseline):
+    bot = bot_with(Classifier(baseline))
+    bot.translator = FakeTranslator(CHINESE)
+    reply = bot.reply_for(1, "垃圾槽冒出很多烟！")
+    assert reply.startswith("这听起来很紧急")
+    assert "emergency number" in reply
+
+
+def test_failed_translation_still_classifies_and_escalates(baseline):
+    bot = bot_with(Classifier(baseline))
+    bot.translator = FakeTranslator(fail=True)
+    assert "emergency number" in bot.reply_for(1, "厨房着火了！")
+    assert bot.conversations[1].translation_failed
+    assert bot.conversations[1].request_text() == "厨房着火了！"
+
+
+def test_english_messages_pass_through_unchanged(baseline):
+    bot = bot_with(Classifier(baseline))
+    bot.translator = FakeTranslator()
+    bot.reply_for(1, "The light keeps flickering outside #05-12")
+    conversation = bot.conversations[1]
+    assert conversation.language is None
+    assert conversation.original_text() is None
+
+
+@pytest.mark.parametrize(
+    "env,message",
+    [
+        ({"TRANSLATE_WITH": "groq", "GROQ_API_KEY": ""}, "GROQ_API_KEY"),
+        ({"TRANSCRIBE_WITH": "groq", "GROQ_API_KEY": ""}, "GROQ_API_KEY"),
+    ],
+)
+def test_build_bot_explains_voice_and_translation_setup(monkeypatch, env, message):
+    pytest.importorskip("telegram")
+    from condo_classifier.telegram_bot import build_bot
+
+    monkeypatch.setenv("BOT_REPLIES", "fixed")
+    monkeypatch.setenv("CLASSIFIER_BACKEND", "baseline")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(SystemExit, match=message):
+        build_bot()

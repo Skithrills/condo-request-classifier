@@ -12,5 +12,7 @@ if not exist ".env" (
     notepad ".env"
     exit /b 0
 )
-uv run --locked --extra telegram python -m condo_classifier.telegram_bot
+set "EXTRAS=--extra telegram"
+findstr /R /C:"^TRANSCRIBE_WITH=.*local" ".env" >nul && set "EXTRAS=--extra telegram --extra voice-local"
+uv run --locked %EXTRAS% python -m condo_classifier.telegram_bot
 if errorlevel 1 pause

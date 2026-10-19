@@ -157,8 +157,9 @@ Validated JSON classification / staff review
 - **Review policy:** missing locations, low scores, multiple requests, sensitive
   actions and urgent reports are flagged. Every LLM classification requires review
   until its confidence has been independently evaluated.
-- **Safety screen:** a small English rule set escalates selected explicit danger
-  phrases before calling the model. It is incomplete and cannot serve as an emergency
+- **Safety screen:** a small English rule set, with a backstop list of Chinese,
+  Malay and Tamil phrases, escalates selected explicit danger phrases before
+  calling the model. It is incomplete and cannot serve as an emergency
   detection or dispatch service.
 
 LangGraph supplies a small deterministic workflow here, not a multi-agent platform.
@@ -225,8 +226,9 @@ be reused with a Groq-specific backend. Correct JSON still needs semantic valida
 and evaluation against labelled requests.
 
 Groq runs remotely and needs a `GROQ_API_KEY` and internet access; local Ollama runs
-on your own hardware. The current app has **no Groq adapter**, and no live Groq
-accuracy or latency measurements have been made. Do not put a Groq URL into the
+on your own hardware. The classifier has **no Groq adapter** (the Telegram bot can
+use Groq for translation and voice messages; see below), and no live Groq
+classification accuracy or latency measurements have been made. Do not put a Groq URL into the
 Ollama server field: the two APIs use different request formats.
 
 As checked on 2026-10-03, Groq lists GPT-OSS 20B at **US$0.075 per million input
@@ -302,6 +304,37 @@ residents in private chats and ignores other messages in the staff group.
 Without `STAFF_CHAT_ID` the bot still chats with residents, but logs a warning
 that requests are not reaching staff.
 
+**Chinese, Malay, Tamil and voice messages**
+
+The safety rules and offline classifier are written for English, so with
+`TRANSLATE_WITH` set the bot translates each message to English first. The
+classifier reads the English; staff cards show the resident's own words with an
+`EN:` line under each; Claude replies in the resident's language. Translated
+requests always go to staff review. The safety screen checks both the translation
+and the original, with a backstop list of Chinese, Malay and Tamil emergency
+phrases, and the emergency reply is fixed text in the resident's language plus
+English. The Malay and Tamil wording needs review by a native speaker.
+
+With `TRANSCRIBE_WITH` set, residents can also send voice messages up to 2 minutes.
+Whisper transcribes them in the language spoken, the bot shows the resident what
+it heard (so a misheard unit number can be corrected), and the original voice
+message is posted under the staff card. Audio is never saved or logged.
+
+1. Create a free key at [console.groq.com/keys](https://console.groq.com/keys).
+2. In `.env`, set `GROQ_API_KEY`, `TRANSLATE_WITH=groq` and `TRANSCRIBE_WITH=groq`.
+3. Restart the bot.
+
+Providers are tried in order, so `TRANSLATE_WITH=groq,ollama` falls back to your
+local Ollama model and `TRANSCRIBE_WITH=groq,local` falls back to faster-whisper
+on your own computer (the launchers install it when `.env` says `local`; the
+`large-v3-turbo` model downloads about 1.6 GB on first use). `claude` also works
+as a translator, billed to your Anthropic account. As reported for October 2026,
+Groq's free plan allows Whisper 20 requests/minute, 2,000/day and 28,800 audio
+seconds/day (each request counts as at least 10 seconds), and GPT-OSS 1,000
+requests/day; check your account's limits page. Both settings are sent to Groq,
+so check [Groq's data controls](https://console.groq.com/docs/your-data) before
+real resident use.
+
 `.env` is gitignored, so your keys stay on your machine. Useful settings:
 
 | Setting | Default | Meaning |
@@ -310,9 +343,15 @@ that requests are not reaching staff.
 | `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
+| `TRANSLATE_WITH` | not set | `groq`, `ollama` and/or `claude`, tried in order |
+| `TRANSCRIBE_WITH` | not set | `groq` and/or `local`, tried in order; turns voice messages on |
+| `GROQ_TRANSLATE_MODEL` / `GROQ_WHISPER_MODEL` | `openai/gpt-oss-120b` / `whisper-large-v3` | Groq models |
+| `LOCAL_WHISPER_MODEL` | `large-v3-turbo` | faster-whisper model; `small` for slower computers |
 
-Message text is never logged. Chat reply wording rules live in
-`condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`.
+Message text and audio are never logged. Chat reply wording rules live in
+`condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`;
+translation and voice live in `condo_classifier/language.py` and
+`condo_classifier/voice.py`.
 
 ## Command line and Python
 
