@@ -1,0 +1,27 @@
+# Render Blueprint: Dashboard > New > Blueprint, then pick this repo.
+# A worker polls Telegram around the clock (Starter plan, no free tier for workers).
+# Free alternative: use `type: web` and `plan: free`. The bot then switches to webhook
+# mode on its own, but Render sleeps it after 15 idle minutes, so the first message
+# after a nap waits while it wakes up.
+services:
+  - type: worker
+    name: condo-telegram-bot
+    runtime: python
+    plan: starter
+    buildCommand: >-
+      pip install uv &&
+      uv export --frozen --no-dev --extra telegram --no-emit-project -o requirements-render.txt &&
+      pip install -r requirements-render.txt
+    startCommand: python -m condo_classifier.telegram_bot
+    envVars:
+      # Secrets: Render asks for these when the Blueprint is created.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: STAFF_CHAT_ID
+        sync: false
+      - key: BOT_REPLIES
+        value: chat
+      - key: CLASSIFIER_BACKEND
+        value: baseline
