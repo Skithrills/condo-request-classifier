@@ -191,13 +191,15 @@ def test_card_shows_language_translation_and_voice():
 class FakeTranscriber:
     def __init__(self, text=None):
         self.text = text
+        self.languages = []
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, language=None):
         from condo_classifier.voice import TranscriptionError
 
         if self.text is None:
             raise TranscriptionError("down")
         assert audio == b"ogg"
+        self.languages.append(language)
         return self.text
 
 
@@ -225,7 +227,8 @@ def test_voice_note_is_echoed_classified_and_forwarded(baseline):
     staff_bot = fake_bot()
     staff_bot.send_voice = AsyncMock()
     heard, reply = send_voice(bot, staff_bot, 1)
-    assert heard == "🎙️ I heard: The light keeps flickering outside #05-12"
+    assert heard.startswith("🎙️ I heard: The light keeps flickering outside #05-12")
+    assert "/language" in heard
     assert "Maintenance" in reply
     assert bot.conversations[1].said[0].voice
     assert "> 🎙️ The light keeps flickering" in staff_bot.send_message.call_args.args[1]
@@ -243,3 +246,36 @@ def test_unclear_or_long_voice_notes_get_a_plain_answer(baseline):
     assert "couldn't make out" in send_voice(bot, staff_bot, 1, duration=0)[0]
     staff_bot.send_message.assert_not_awaited()
     assert 1 not in bot.conversations
+
+
+def test_chosen_language_goes_to_whisper(baseline):
+    transcriber = FakeTranscriber("Saya terperangkap dalam lif")
+    bot = ResidentBot(Classifier(baseline), transcriber=transcriber)
+    staff_bot = fake_bot()
+
+    keyboard = SimpleNamespace(reply_text=AsyncMock())
+    chat = SimpleNamespace(id=1)
+    asyncio.run(
+        bot.language(SimpleNamespace(effective_message=keyboard, effective_chat=chat), None)
+    )
+    buttons = keyboard.reply_text.call_args.kwargs["reply_markup"].inline_keyboard
+    assert [row[0].callback_data for row in buttons] == [
+        "lang:auto",
+        "lang:en",
+        "lang:zh",
+        "lang:ms",
+        "lang:ta",
+    ]
+
+    query = SimpleNamespace(data="lang:ms", answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(bot.set_language(SimpleNamespace(callback_query=query, effective_chat=chat), None))
+    assert "Bahasa Melayu" in query.edit_message_text.call_args.args[0]
+
+    heard, _ = send_voice(bot, staff_bot, 1)
+    assert transcriber.languages == ["ms"]
+    assert "/language" not in heard
+
+    query.data = "lang:auto"
+    asyncio.run(bot.set_language(SimpleNamespace(callback_query=query, effective_chat=chat), None))
+    send_voice(bot, staff_bot, 1)
+    assert transcriber.languages == ["ms", None]

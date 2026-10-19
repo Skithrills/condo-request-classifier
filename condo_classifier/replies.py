@@ -29,6 +29,12 @@ VOICE_FAILED = (
 
 HEARD = "🎙️ I heard: {text}"
 
+HEARD_HINT = "\n\nWrong language? Send /language to choose yours."
+
+CHOOSE_LANGUAGE = "Which language will you speak in voice messages?"
+
+LANGUAGE_SET = "Got it. Voice messages: {language}. Send /language to change."
+
 INVALID = "Please describe your request in words, between 3 and 4,000 characters."
 
 UNAVAILABLE = (

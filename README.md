@@ -318,7 +318,11 @@ English. The Malay and Tamil wording needs review by a native speaker.
 With `TRANSCRIBE_WITH` set, residents can also send voice messages up to 2 minutes.
 Whisper transcribes them in the language spoken, the bot shows the resident what
 it heard (so a misheard unit number can be corrected), and the original voice
-message is posted under the staff card. Audio is never saved or logged.
+message is posted under the staff card. Audio is never saved or logged. Whisper's
+language guess can be wrong on short clips (accented English often comes out as
+Malay or Indonesian), so residents can send `/language` to pick English, 中文,
+Bahasa Melayu or தமிழ் for their voice messages; the choice lasts until the bot
+restarts.
 
 1. Create a free key at [console.groq.com/keys](https://console.groq.com/keys).
 2. In `.env`, set `GROQ_API_KEY`, `TRANSLATE_WITH=groq` and `TRANSCRIBE_WITH=groq`.

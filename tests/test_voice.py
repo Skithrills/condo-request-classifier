@@ -69,14 +69,45 @@ def test_groq_uploads_wav_and_returns_text(voice_note):
         seen["path"] = request.url.path
         seen["auth"] = request.headers["authorization"]
         seen["body"] = request.read()
-        return httpx.Response(200, json={"text": " 电梯坏了 "})
+        return httpx.Response(200, json={"text": " 电梯坏了 ", "language": "chinese"})
 
     assert groq(handler).transcribe(voice_note) == "电梯坏了"
     assert seen["path"] == "/openai/v1/audio/transcriptions"
     assert seen["auth"] == "Bearer gsk-test"
     assert b'filename="voice.wav"' in seen["body"]
     assert b"whisper-large-v3" in seen["body"]
+    assert b"verbose_json" in seen["body"]
+    assert b'name="language"' not in seen["body"]
     assert b"RIFF" in seen["body"]
+
+
+def test_groq_retries_unsupported_languages_as_english(voice_note):
+    bodies = []
+
+    def handler(request):
+        bodies.append(request.read())
+        if b'name="language"' in bodies[-1]:
+            return httpx.Response(
+                200, json={"text": "I'm stuck in the lift", "language": "english"}
+            )
+        return httpx.Response(200, json={"text": "Saya terjebak di lift", "language": "indonesian"})
+
+    assert groq(handler).transcribe(voice_note) == "I'm stuck in the lift"
+    assert len(bodies) == 2
+
+
+def test_groq_uses_the_residents_language(voice_note):
+    bodies = []
+
+    def handler(request):
+        bodies.append(request.read())
+        return httpx.Response(
+            200, json={"text": "Saya terperangkap dalam lif", "language": "malay"}
+        )
+
+    assert groq(handler).transcribe(voice_note, "ms") == "Saya terperangkap dalam lif"
+    assert len(bodies) == 1
+    assert b'name="language"\r\n\r\nms' in bodies[0]
 
 
 def test_groq_failure_is_a_transcription_error(voice_note):
@@ -88,8 +119,26 @@ def test_local_joins_segments(monkeypatch):
     pytest.importorskip("faster_whisper")
     transcriber = LocalTranscriber()
     segments = [SimpleNamespace(text=" Lif di Blok 5 "), SimpleNamespace(text="rosak. ")]
-    transcriber.model = SimpleNamespace(transcribe=lambda audio, **_: (iter(segments), None))
+    calls = []
+
+    def transcribe(audio, language=None, **_):
+        calls.append(language)
+        return iter(segments), SimpleNamespace(language=language or "ms")
+
+    transcriber.model = SimpleNamespace(transcribe=transcribe)
     assert transcriber.transcribe(b"ogg") == "Lif di Blok 5 rosak."
+    assert calls == [None]
+
+
+def test_retry_as_english():
+    from condo_classifier.voice import retry_as_english
+
+    assert retry_as_english(None, "indonesian")
+    assert retry_as_english(None, "cy")
+    assert not retry_as_english(None, "Malay")
+    assert not retry_as_english(None, "zh")
+    assert not retry_as_english("ms", "indonesian")
+    assert not retry_as_english(None, None)
 
 
 class Fixed:
@@ -97,7 +146,7 @@ class Fixed:
         self.name = name
         self.text = text
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, language=None):
         if self.text is None:
             raise TranscriptionError("down")
         return self.text

@@ -18,6 +18,19 @@ log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000  # What Whisper uses internally; keeps uploads small.
 
+# Languages residents can pick with /language, by ISO 639-1 code.
+VOICE_LANGUAGES = {"en": "English", "zh": "中文", "ms": "Bahasa Melayu", "ta": "தமிழ்"}
+# Groq reports language names; faster-whisper reports codes.
+WHISPER_NAMES = {"english": "en", "chinese": "zh", "malay": "ms", "tamil": "ta"}
+
+
+def retry_as_english(requested: str | None, detected: str | None) -> bool:
+    """Short or accented English is often detected as Indonesian, Welsh and so on."""
+    if requested or not detected:
+        return False
+    detected = detected.strip().lower()
+    return WHISPER_NAMES.get(detected, detected) not in VOICE_LANGUAGES
+
 
 class TranscriptionError(RuntimeError):
     """Safe error message that excludes provider payloads, keys and audio."""
@@ -62,16 +75,27 @@ class GroqTranscriber:
             timeout=timeout,
         )
 
-    def transcribe(self, audio: bytes) -> str:
+    def transcribe(self, audio: bytes, language: str | None = None) -> str:
         wav = to_wav(audio)
+        text, detected = self.request(wav, language)
+        if retry_as_english(language, detected):
+            log.info("Whisper detected an unsupported language; retrying as English")
+            text, _ = self.request(wav, "en")
+        return text
+
+    def request(self, wav: bytes, language: str | None) -> tuple[str, str | None]:
+        data = {"model": self.model, "response_format": "verbose_json", "temperature": "0"}
+        if language:
+            data["language"] = language
         try:
             response = self.client.post(
                 "/audio/transcriptions",
                 files={"file": ("voice.wav", wav, "audio/wav")},
-                data={"model": self.model, "response_format": "json", "temperature": "0"},
+                data=data,
             )
             response.raise_for_status()
-            return response.json()["text"].strip()
+            payload = response.json()
+            return payload["text"].strip(), payload.get("language")
         except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise TranscriptionError(f"Groq transcription failed: {type(exc).__name__}") from exc
 
@@ -96,7 +120,7 @@ class LocalTranscriber:
         # One voice note at a time: loading twice would double memory, and it is CPU-bound.
         self.lock = threading.Lock()
 
-    def transcribe(self, audio: bytes) -> str:
+    def transcribe(self, audio: bytes, language: str | None = None) -> str:
         from faster_whisper import WhisperModel
 
         with self.lock:
@@ -106,7 +130,13 @@ class LocalTranscriber:
                     self.model = WhisperModel(
                         self.model_name, device=self.device, compute_type="int8"
                     )
-                segments, _ = self.model.transcribe(io.BytesIO(audio), beam_size=5, vad_filter=True)
+                segments, info = self.model.transcribe(
+                    io.BytesIO(audio), language=language, beam_size=5, vad_filter=True
+                )
+                if retry_as_english(language, info.language):
+                    segments, _ = self.model.transcribe(
+                        io.BytesIO(audio), language="en", beam_size=5, vad_filter=True
+                    )
                 return " ".join(segment.text.strip() for segment in segments).strip()
             except Exception as exc:  # ctranslate2 and PyAV raise many unrelated types.
                 raise TranscriptionError(
@@ -120,10 +150,11 @@ class TranscriberChain:
             raise ValueError("Add at least one transcriber.")
         self.transcribers = transcribers
 
-    def transcribe(self, audio: bytes) -> str:
+    def transcribe(self, audio: bytes, language: str | None = None) -> str:
+        """Transcribe in `language` (an ISO 639-1 code), or detect it when None."""
         for transcriber in self.transcribers:
             try:
-                text = transcriber.transcribe(audio)
+                text = transcriber.transcribe(audio, language)
             except TranscriptionError as exc:
                 log.warning("Transcriber %s failed: %s", transcriber.name, exc)
                 continue

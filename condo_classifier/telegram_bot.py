@@ -12,9 +12,23 @@ import time
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
-from telegram import Bot, ReplyParameters, Update, User
+from telegram import (
+    Bot,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyParameters,
+    Update,
+    User,
+)
 from telegram.error import BadRequest, TelegramError
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from condo_classifier.backends import ROOT, backend_from_name
 from condo_classifier.chat import (
@@ -25,8 +39,11 @@ from condo_classifier.chat import (
 )
 from condo_classifier.language import TranslationError, TranslatorChain, translator_from_env
 from condo_classifier.replies import (
+    CHOOSE_LANGUAGE,
     HEARD,
+    HEARD_HINT,
     INVALID,
+    LANGUAGE_SET,
     NEW_REQUEST,
     TEXT_ONLY,
     TEXT_OR_VOICE,
@@ -39,7 +56,7 @@ from condo_classifier.replies import (
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
 from condo_classifier.staff import new_request_id, resident_label, staff_card
-from condo_classifier.voice import TranscriberChain, transcriber_from_env
+from condo_classifier.voice import VOICE_LANGUAGES, TranscriberChain, transcriber_from_env
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +79,8 @@ class ResidentBot:
         self.transcriber = transcriber
         self.conversations: dict[int, Conversation] = {}
         self.locks: dict[int, asyncio.Lock] = {}
+        # Voice language each resident picked with /language. Survives /new, not restarts.
+        self.voice_languages: dict[int, str] = {}
 
     def conversation(self, chat_id: int) -> Conversation:
         conversation = self.conversations.get(chat_id)
@@ -209,20 +228,45 @@ class ResidentBot:
         if seconds and seconds > MAX_VOICE_SECONDS:
             await message.reply_text(VOICE_TOO_LONG.format(seconds=MAX_VOICE_SECONDS))
             return
+        language = self.voice_languages.get(chat_id)
         async with self.lock(chat_id):
             await context.bot.send_chat_action(chat_id, "typing")
             try:
                 file = await voice.get_file()
                 audio = bytes(await file.download_as_bytearray())
-                transcript = await asyncio.to_thread(self.transcriber.transcribe, audio)
+                transcript = await asyncio.to_thread(self.transcriber.transcribe, audio, language)
             except Exception as exc:
                 log.warning("Voice message failed: %s", type(exc).__name__)
                 await message.reply_text(VOICE_FAILED)
                 return
             transcript = transcript[:4000]
             # Show what was heard so the resident can correct a misheard unit number.
-            await message.reply_text(HEARD.format(text=transcript))
+            heard = HEARD.format(text=transcript)
+            await message.reply_text(heard if language else heard + HEARD_HINT)
             await self.respond(update, context, transcript, voice.file_id)
+
+    async def language(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Let the resident fix the voice language, since Whisper's guess can be wrong."""
+        buttons = [[InlineKeyboardButton("Auto-detect", callback_data="lang:auto")]] + [
+            [InlineKeyboardButton(name, callback_data=f"lang:{code}")]
+            for code, name in VOICE_LANGUAGES.items()
+        ]
+        await update.effective_message.reply_text(
+            CHOOSE_LANGUAGE, reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    async def set_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        code = query.data.removeprefix("lang:")
+        chat_id = update.effective_chat.id
+        if code in VOICE_LANGUAGES:
+            self.voice_languages[chat_id] = code
+        else:
+            self.voice_languages.pop(chat_id, None)
+        await query.answer()
+        await query.edit_message_text(
+            LANGUAGE_SET.format(language=VOICE_LANGUAGES.get(code, "auto-detect"))
+        )
 
     async def respond(
         self,
@@ -266,6 +310,8 @@ class ResidentBot:
         app.add_handler(CommandHandler("new", self.new, filters=private))
         app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, self.text))
         if self.transcriber:
+            app.add_handler(CommandHandler("language", self.language, filters=private))
+            app.add_handler(CallbackQueryHandler(self.set_language, pattern=r"^lang:"))
             app.add_handler(MessageHandler(private & filters.VOICE, self.voice))
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         # CommandHandler ignores channel posts, so match /chatid as text to cover channels.
