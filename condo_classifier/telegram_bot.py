@@ -3,9 +3,13 @@
 Run with `run_bot.cmd` (Windows), `./run_bot.sh` (macOS/Linux) or
 `uv run --extra telegram python -m condo_classifier.telegram_bot`. Message text is never
 logged; only the outcome is. Conversations live in memory and reset on restart.
+
+The bot polls Telegram by default. When WEBHOOK_URL (or Render's RENDER_EXTERNAL_URL) is
+set it serves a webhook on PORT instead, so a Render web service can host it.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -213,9 +217,23 @@ def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token:
         raise SystemExit("Set TELEGRAM_BOT_TOKEN in .env (create a bot with @BotFather).")
-    bot = build_bot()
-    log.info("Bot is running. Message it on Telegram; press Ctrl+C here to stop.")
-    bot.application(token).run_polling(allowed_updates=Update.ALL_TYPES)
+    app = build_bot().application(token)
+    # Render sets RENDER_EXTERNAL_URL on web services; workers have none and poll instead.
+    base_url = os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL")
+    if base_url:
+        log.info("Bot is running in webhook mode.")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv("PORT", "8443")),
+            url_path="telegram",
+            webhook_url=f"{base_url.rstrip('/')}/telegram",
+            # Telegram echoes this header on every update, so other callers are rejected.
+            secret_token=hashlib.sha256(token.encode()).hexdigest(),
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        log.info("Bot is running. Message it on Telegram; press Ctrl+C here to stop.")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
