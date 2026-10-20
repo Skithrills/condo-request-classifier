@@ -14,6 +14,18 @@ class SafetySignal:
 
 EMERGENCY_PATTERNS = (
     (Category.MAINTENANCE, r"\b(?:on fire|flames|smoke (?:is |coming |pouring |in |from ))\b"),
+    # Everyday phrasings: "there's a fire", "fire in the lift lobby", "caught fire".
+    (
+        Category.MAINTENANCE,
+        r"\b(?:there(?:'s| is| are)|i (?:can )?see) (?:a |some )?(?:fire|smoke|flames)\b",
+    ),
+    (Category.MAINTENANCE, r"\bfire (?:in|at|on|inside|near|spreading)\b"),
+    (Category.MAINTENANCE, r"\b(?:caught|catching|catch) fire\b|\b(?:is|are) (?:burning|ablaze)\b"),
+    (
+        Category.MAINTENANCE,
+        r"\b(?:full of|filled with) smoke\b|\bsmoke everywhere\b|"
+        r"\bburning smell\b|\bsmell(?:s|ing)? (?:of )?burning\b",
+    ),
     (Category.MAINTENANCE, r"\b(?:gas leak|smell (?:of )?gas|smelling gas)\b"),
     (
         Category.MAINTENANCE,
@@ -21,6 +33,19 @@ EMERGENCY_PATTERNS = (
     ),
     (Category.MAINTENANCE, r"\b(?:sparks|sparking|exposed live wire|electrocut\w*)\b"),
     (Category.SECURITY, r"\b(?:attacking|assaulting|unconscious|not breathing)\b"),
+    # Injuries and medical emergencies: a person who is hurt right now.
+    (
+        Category.SECURITY,
+        # A person falling, not paint or leaves: a person word shortly before the verb.
+        r"\b(?:i|he|she|they|someone|somebody|person|man|woman|lady|boy|girl|child|kid|"
+        r"baby|son|daughter|wife|husband|mum|mom|mother|dad|father|grandma|grandpa|"
+        r"grandmother|grandfather|granny|aunt|uncle|neighbou?r|resident|elderly|helper|"
+        r"maid|worker|cleaner|guard)\b[^.!?\n]{0,25}?\b(?:fell|has fallen|have fallen|"
+        r"tripped|slipped) (?:down|off|from|over|on)\b|"
+        r"\b(?:injured|bleeding|collapsed|fainted|passed out|seizure|choking|"
+        r"heart attack|stroke|can'?t get up|can'?t breathe|cannot breathe|"
+        r"broke (?:his|her|my|their) (?:leg|arm|hip|neck|back)|hit (?:his|her|their) head)\b",
+    ),
 )
 HYPOTHETICAL = re.compile(
     r"\b(?:what (?:should|would|do)|in case of|if there|if someone|fire drill|"

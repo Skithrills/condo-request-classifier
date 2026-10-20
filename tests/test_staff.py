@@ -75,15 +75,21 @@ def fake_bot():
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=7)),
         edit_message_text=AsyncMock(),
         send_chat_action=AsyncMock(),
+        set_message_reaction=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
     )
     return bot
 
 
 def run(bot, staff_bot, chat_id, text):
-    message = SimpleNamespace(text=text, reply_text=AsyncMock())
+    message = SimpleNamespace(
+        text=text,
+        message_id=100,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=200)),
+    )
     update = SimpleNamespace(
         effective_message=message,
-        effective_chat=SimpleNamespace(id=chat_id),
+        effective_chat=SimpleNamespace(id=chat_id, type="private"),
         effective_user=USER,
     )
     asyncio.run(bot.text(update, SimpleNamespace(bot=staff_bot)))
@@ -166,3 +172,20 @@ def test_invalid_staff_chat_id_rejected(monkeypatch):
     monkeypatch.setenv("STAFF_CHAT_ID", "@staffgroup")
     with pytest.raises(SystemExit, match="STAFF_CHAT_ID must be a number"):
         build_bot()
+
+
+def test_resident_confirmation_replaces_model_uncertainty_notes():
+    from condo_classifier.service import LOW_SCORE, UNCALIBRATED
+    from condo_classifier.staff import RESIDENT_CONFIRMED, review_notes
+
+    reasons = [LOW_SCORE, UNCALIBRATED, "Location is missing."]
+    assert review_notes(reasons, "open") == reasons
+    assert review_notes(reasons, "ready") == reasons
+    assert review_notes(reasons, "submitted") == ["Location is missing.", RESIDENT_CONFIRMED]
+    assert review_notes(reasons, "with_staff") == ["Location is missing."]
+    assert review_notes(["Urgent report requires staff triage."], "submitted") == [
+        "Urgent report requires staff triage."
+    ]
+    card = staff_card("R-1", "Jane", result(review_reasons=[LOW_SCORE]), ["x"], "submitted")
+    assert LOW_SCORE not in card
+    assert RESIDENT_CONFIRMED in card
