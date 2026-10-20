@@ -61,9 +61,18 @@ IDLE_RESET_SECONDS = 2 * 60 * 60
 MAX_REPLY_CHARS = 4000  # Telegram allows 4,096
 
 
+@dataclass(frozen=True)
+class ResidentMessage:
+    text: str  # What the resident typed or said, in their language.
+    english: str  # What the classifier reads; the same text when it was already English.
+    voice: bool = False
+
+
 @dataclass
 class Conversation:
-    resident_texts: list[str] = field(default_factory=list)
+    said: list[ResidentMessage] = field(default_factory=list)
+    language: str | None = None  # Latest non-English language code, like "zh".
+    translation_failed: bool = False
     messages: list[dict] = field(default_factory=list)
     escalated: bool = False
     last_seen: float = field(default_factory=time.monotonic)
@@ -97,8 +106,18 @@ class Conversation:
     saved: bool = False
     deleted: bool = False
 
+    @property
+    def resident_texts(self) -> list[str]:
+        return [message.text for message in self.said]
+
     def request_text(self) -> str:
-        """Everything the resident has said, newest last, within the request size limit."""
+        """Everything the resident has said in English, newest last, within the size limit."""
+        return "\n".join(message.english for message in self.said)[-4000:].strip()
+
+    def original_text(self) -> str | None:
+        """The resident's own words, only when some of them were translated."""
+        if all(message.english == message.text for message in self.said):
+            return None
         return "\n".join(self.resident_texts)[-4000:].strip()
 
 

@@ -56,7 +56,11 @@ class Classifier:
         return result.model_copy(update={"elapsed_ms": round((perf_counter() - started) * 1000, 1)})
 
     def _screen(self, state: State) -> dict:
-        signal = safety_signal(state["request"].text)
+        request = state["request"]
+        # Screen the resident's own words too, in case the translation lost the danger.
+        signal = safety_signal(request.text) or (
+            request.original_text and safety_signal(request.original_text)
+        )
         if not signal:
             return {"signal": None}
         return {
@@ -67,7 +71,7 @@ class Classifier:
                 confidence_kind="unavailable",
                 evidence=[signal.evidence],
                 backend="safety_rules",
-                model="english-safety-screen-v1",
+                model="safety-screen-v2",
             ),
         }
 
@@ -114,7 +118,11 @@ class Classifier:
             reasons.append(
                 "Sensitive access, money or approval request needs an authorised person."
             )
-        if INSTRUCTION_ATTACK.search(request.text):
+        if request.original_text:
+            reasons.append("Translated to English; staff should check the resident's own words.")
+        if INSTRUCTION_ATTACK.search(request.text) or (
+            request.original_text and INSTRUCTION_ATTACK.search(request.original_text)
+        ):
             reasons.append(
                 "Message contains instructions that may be unrelated to the resident request."
             )

@@ -1,4 +1,8 @@
-"""Conservative English triage hints, not a complete emergency detection system."""
+"""Conservative triage hints, not a complete emergency detection system.
+
+The rules are written for English. Messages in other languages are translated first; the
+Chinese, Malay and Tamil phrases below are a backstop for when translation is missing or wrong.
+"""
 
 import re
 from dataclasses import dataclass
@@ -47,6 +51,31 @@ EMERGENCY_PATTERNS = (
         r"broke (?:his|her|my|their) (?:leg|arm|hip|neck|back)|hit (?:his|her|their) head)\b",
     ),
 )
+# Clear present-danger phrases only. Malay and Tamil wording needs native-speaker review.
+OTHER_LANGUAGE_EMERGENCY_PATTERNS = (
+    # Chinese (simplified and traditional)
+    (Category.MAINTENANCE, r"着火|著火|起火|失火|火灾|火災|冒烟|冒煙|浓烟|濃煙"),
+    (Category.MAINTENANCE, r"煤气泄漏|煤氣洩漏|漏气|漏氣|闻到煤气|聞到煤氣|燃气泄漏"),
+    (Category.MAINTENANCE, r"(?:困|关|關)在电梯|(?:困|关|關)在電梯|电梯里被困|電梯裡被困"),
+    (Category.MAINTENANCE, r"触电|觸電|冒火花"),
+    (Category.SECURITY, r"昏迷|不省人事|没有呼吸|沒有呼吸|被攻击|被攻擊"),
+    # Malay
+    (Category.MAINTENANCE, r"\b(?:kebakaran|terbakar|asap tebal)\b"),
+    (Category.MAINTENANCE, r"\b(?:bocor gas|kebocoran gas|bau gas)\b"),
+    (Category.MAINTENANCE, r"\b(?:terperangkap|tersekat) (?:dalam |di dalam )?lif\b"),
+    (Category.MAINTENANCE, r"\b(?:renjatan elektrik|kejutan elektrik)\b"),
+    (Category.SECURITY, r"\b(?:pengsan|tidak sedarkan diri|tak sedarkan diri|tidak bernafas)\b"),
+    # Tamil
+    (Category.MAINTENANCE, r"தீப்பிடி|தீ விபத்து|புகை வருகிறது"),
+    (Category.MAINTENANCE, r"எரிவாயு கசிவு|கேஸ் கசிவு"),
+    (Category.MAINTENANCE, r"லிஃப்டில் சிக்கி|லிப்டில் சிக்கி|மின்தூக்கியில் சிக்கி"),
+    (Category.MAINTENANCE, r"மின்சாரம் தாக்கி"),
+    (Category.SECURITY, r"மயக்கம்|மூச்சு விடவில்லை"),
+)
+# "No fire" style negation right before the phrase. Tamil negates after the verb, so it has none.
+OTHER_LANGUAGE_NEGATION = re.compile(
+    r"(?:没有|沒有|没|沒|不是|无|無)$|\b(?:tidak|tiada|bukan|tak)\s+$", re.I
+)
 HYPOTHETICAL = re.compile(
     r"\b(?:what (?:should|would|do)|in case of|if there|if someone|fire drill|"
     r"fire safety|evacuation plan|training exercise|yesterday|last week|resolved)\b",
@@ -82,13 +111,18 @@ TOPIC_CUES = {
 
 def safety_signal(text: str) -> SafetySignal | None:
     # Scope negation to a short prefix and each clause, not the entire message.
-    for clause in re.split(r"[.!?;\n]|\bbut\b|\bhowever\b", text, flags=re.I):
-        if HYPOTHETICAL.search(clause):
-            continue
-        for category, pattern in EMERGENCY_PATTERNS:
+    for clause in re.split(r"[.!?;\n。！？；]|\bbut\b|\bhowever\b", text, flags=re.I):
+        if not HYPOTHETICAL.search(clause):
+            for category, pattern in EMERGENCY_PATTERNS:
+                for match in re.finditer(pattern, clause, re.I):
+                    prefix = clause[max(0, match.start() - 28) : match.start()]
+                    if not NEGATION.search(prefix):
+                        return SafetySignal(category, match.group().strip())
+        # No hypothetical filter here: over-escalating beats missing an emergency.
+        for category, pattern in OTHER_LANGUAGE_EMERGENCY_PATTERNS:
             for match in re.finditer(pattern, clause, re.I):
-                prefix = clause[max(0, match.start() - 28) : match.start()]
-                if not NEGATION.search(prefix):
+                prefix = clause[max(0, match.start() - 12) : match.start()]
+                if not OTHER_LANGUAGE_NEGATION.search(prefix):
                     return SafetySignal(category, match.group().strip())
     return None
 

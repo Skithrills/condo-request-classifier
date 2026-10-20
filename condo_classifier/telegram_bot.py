@@ -1,8 +1,8 @@
 """Resident-facing Telegram bot.
 
 Run with `run_bot.cmd` (Windows), `./run_bot.sh` (macOS/Linux) or
-`uv run --extra telegram python -m condo_classifier.telegram_bot`. Message text is never
-logged; only the outcome is. Conversations live in memory and reset on restart; requests
+`uv run --extra telegram python -m condo_classifier.telegram_bot`. Message text and audio are
+never logged; only the outcome is. Conversations live in memory and reset on restart; requests
 are saved to the SQLite store that the staff dashboard reads.
 
 The bot polls Telegram by default. When WEBHOOK_URL (or Render's RENDER_EXTERNAL_URL) is
@@ -26,6 +26,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    ReplyParameters,
     Update,
     User,
 )
@@ -48,17 +49,22 @@ from condo_classifier.chat import (
     FallbackChat,
     OllamaChat,
     ResidentChat,
+    ResidentMessage,
     ready_to_submit,
 )
 from condo_classifier.knowledge import FAQ_PATH, KnowledgeBase, looks_like_question
+from condo_classifier.language import TranslationError, TranslatorChain, translator_from_env
 from condo_classifier.replies import (
     CANCELLED,
-    EMERGENCY,
+    CHOOSE_LANGUAGE,
     HANDED_BACK,
+    HEARD,
+    HEARD_HINT,
     HUMAN,
     HUMAN_ALREADY,
     HUMAN_FIRST,
     INVALID,
+    LANGUAGE_SET,
     NEW_REQUEST,
     NOT_FOR_YOU,
     NOT_READY,
@@ -72,8 +78,12 @@ from condo_classifier.replies import (
     STALE,
     SUBMITTED,
     TEXT_ONLY,
+    TEXT_OR_VOICE,
     UNAVAILABLE,
+    VOICE_FAILED,
+    VOICE_TOO_LONG,
     WELCOME,
+    emergency_reply,
     quick_reply,
     resident_reply,
     work_order_summary,
@@ -96,6 +106,7 @@ from condo_classifier.vision import (
     photo_message,
     prepare_image,
 )
+from condo_classifier.voice import VOICE_LANGUAGES, TranscriberChain, transcriber_from_env
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +126,7 @@ MAX_PHOTO_BYTES = 10 * 1024 * 1024
 BOT_TO_BOT_WINDOW = 10 * 60
 # Saved copies for staff: big enough to see small defects, small enough to keep.
 SAVED_PHOTO_EDGE = 2048
+MAX_VOICE_SECONDS = 120
 
 
 # A conversation belongs to a private chat (its ID) or, in a group, to one person in it.
@@ -168,6 +180,8 @@ class ResidentBot:
         describer: PhotoDescriber | None = None,
         bot_to_bot_limit: int = 3,
         knowledge: KnowledgeBase | None = None,
+        translator: TranslatorChain | None = None,
+        transcriber: TranscriberChain | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
@@ -175,6 +189,8 @@ class ResidentBot:
         self.store = store
         self.describer = describer
         self.knowledge = knowledge
+        self.translator = translator
+        self.transcriber = transcriber
         self.conversations: dict[Key, Conversation] = {}
         self.locks: dict[Key, asyncio.Lock] = {}
         # Loop guard for groups shared with other bots: recent replies to bots, per chat.
@@ -184,6 +200,8 @@ class ResidentBot:
         # so a staff member's reply reaches the right resident.
         self.staff_threads: dict[int, Key] = {}
         self.avatars_checked: set[int] = set()
+        # Voice language each resident picked with /language. Survives /new, not restarts.
+        self.voice_languages: dict[Key, str] = {}
 
     def conversation(self, key: Key) -> Conversation:
         conversation = self.conversations.get(key)
@@ -193,15 +211,34 @@ class ResidentBot:
         conversation.last_seen = now
         return conversation
 
-    def reply_for(self, key: Key, text: str) -> str:
+    def english_for(self, conversation: Conversation, text: str) -> str:
+        """Translate for the classifier. On failure, classify the words as written."""
+        if self.translator is None:
+            return text
+        try:
+            translation = self.translator.translate(text)
+            ResidentRequest(text=translation.english, channel="Telegram")
+        except (TranslationError, ValidationError):
+            conversation.translation_failed = True
+            return text
+        if translation.translated:
+            conversation.language = translation.language
+        return translation.english
+
+    def reply_for(self, key: Key, text: str, voice: bool = False) -> str:
         try:
             ResidentRequest(text=text, channel="Telegram")
         except ValidationError:
             return INVALID
         conversation = self.conversation(key)
-        conversation.resident_texts.append(text)
+        english = self.english_for(conversation, text)
+        conversation.said.append(ResidentMessage(text, english, voice))
         # Classify the whole conversation so details sent later fill in what was missing.
-        request = ResidentRequest(text=conversation.request_text(), channel="Telegram")
+        request = ResidentRequest(
+            text=conversation.request_text(),
+            original_text=conversation.original_text(),
+            channel="Telegram",
+        )
         result = self.classifier.classify(request)
         conversation.last_result = result
         conversation.request_id = conversation.request_id or new_request_id()
@@ -220,11 +257,13 @@ class ResidentBot:
         else:
             conversation.status = "ready" if ready_to_submit(result) else "open"
         log.info(
-            "classified category=%s priority=%s status=%s request=%s",
+            "classified category=%s priority=%s status=%s request=%s language=%s voice=%s",
             result.category,
             result.priority,
             conversation.status,
             conversation.request_id,
+            conversation.language or "en",
+            voice,
         )
         self.save(key, conversation)
         reply = None
@@ -232,12 +271,13 @@ class ResidentBot:
             # Emergencies always get the fixed safety text, never generated wording.
             conversation.escalated = True
         elif self.chat and result.status != "provider_error":
+            # The chat model sees the resident's own words so it replies in their language.
             reply = self.chat.reply(conversation, text, result)
         if reply is None:
             if conversation.faq_facts and result.status != "safety_escalation":
                 reply = conversation.faq_facts[0].answer
             else:
-                reply = resident_reply(result)
+                reply = resident_reply(result, conversation.language)
             conversation.messages += [
                 {"role": "user", "content": text},
                 {"role": "assistant", "content": reply},
@@ -330,10 +370,18 @@ class ResidentBot:
         except TelegramError:
             pass
 
-    async def notify_staff(self, bot: Bot, conversation: Conversation, fresh=False) -> None:
-        """Post or update this request's card in the staff chat, then any new photos under
-        it. Never blocks the resident."""
+    async def notify_staff(
+        self,
+        bot: Bot,
+        conversation: Conversation,
+        fresh=False,
+        voice_file_id: str | None = None,
+    ) -> None:
+        """Post or update this request's card in the staff chat, then any new photos or voice
+        note under it. Never blocks the resident."""
         await self.post_card(bot, conversation, fresh)
+        if voice_file_id:
+            await self.send_voice_to_staff(bot, conversation, voice_file_id)
         if self.staff_chat_id is None or self.store is None:
             return
         while conversation.staff_photos_sent < len(conversation.photos):
@@ -351,6 +399,25 @@ class ResidentBot:
             except (OSError, TelegramError) as exc:
                 log.warning("Could not send a photo to staff: %s", type(exc).__name__)
 
+    async def send_voice_to_staff(
+        self, bot: Bot, conversation: Conversation, voice_file_id: str
+    ) -> None:
+        """Staff can listen to the original when the transcript looks wrong."""
+        if self.staff_chat_id is None or not self.worth_tracking(conversation):
+            return
+        try:
+            sent = await bot.send_voice(
+                self.staff_chat_id,
+                voice_file_id,
+                caption=f"🎙️ {conversation.request_id}",
+                reply_parameters=ReplyParameters(
+                    conversation.staff_message_id, allow_sending_without_reply=True
+                ),
+            )
+            self.staff_threads[sent.message_id] = conversation.key
+        except TelegramError as exc:
+            log.warning("Could not send a voice note to staff: %s", type(exc).__name__)
+
     async def post_card(self, bot: Bot, conversation: Conversation, fresh=False) -> None:
         result = conversation.last_result
         if self.staff_chat_id is None or not self.worth_tracking(conversation):
@@ -361,8 +428,10 @@ class ResidentBot:
             conversation.request_id,
             conversation.resident,
             result,
-            conversation.resident_texts,
+            conversation.said,
             conversation.status,
+            language=conversation.language,
+            translation_failed=conversation.translation_failed,
         )
         # A first emergency gets a fresh message so it notifies; otherwise edit the card.
         if conversation.status == "emergency" and not conversation.staff_alerted:
@@ -528,6 +597,64 @@ class ResidentBot:
             log.info("Photo described (%d chars)", len(description))
             await self.respond(update, context, photo_message(description, caption), jpeg)
 
+    async def voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        message = update.effective_message
+        chat_id = update.effective_chat.id
+        key = self.key(update)
+        voice = message.voice
+        duration = voice.duration
+        seconds = duration.total_seconds() if hasattr(duration, "total_seconds") else duration
+        if seconds is not None and seconds < 1:
+            # Usually an accidental tap; Whisper tends to invent words from near-silence.
+            await message.reply_text(VOICE_FAILED)
+            return
+        if seconds and seconds > MAX_VOICE_SECONDS:
+            await message.reply_text(VOICE_TOO_LONG.format(seconds=MAX_VOICE_SECONDS))
+            return
+        language = self.voice_languages.get(key)
+        async with self.lock(key):
+            await context.bot.send_chat_action(chat_id, "typing")
+            try:
+                file = await voice.get_file()
+                audio = bytes(await file.download_as_bytearray())
+                transcript = await asyncio.to_thread(self.transcriber.transcribe, audio, language)
+            except Exception as exc:
+                log.warning("Voice message failed: %s", type(exc).__name__)
+                await message.reply_text(VOICE_FAILED)
+                return
+            transcript = transcript[:4000]
+            existing = self.conversations.get(key)
+            if existing is not None and existing.human_active:
+                await self.forward_to_staff(update, context, existing, transcript, voice=True)
+                return
+            # Show what was heard so the resident can correct a misheard unit number.
+            heard = HEARD.format(text=transcript)
+            await message.reply_text(heard if language else heard + HEARD_HINT)
+            await self.respond(update, context, transcript, voice_file_id=voice.file_id)
+
+    async def language(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Let the resident fix the voice language, since Whisper's guess can be wrong."""
+        buttons = [[InlineKeyboardButton("Auto-detect", callback_data="lang:auto")]] + [
+            [InlineKeyboardButton(name, callback_data=f"lang:{code}")]
+            for code, name in VOICE_LANGUAGES.items()
+        ]
+        await update.effective_message.reply_text(
+            CHOOSE_LANGUAGE, reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    async def set_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        code = query.data.removeprefix("lang:")
+        key = update.effective_chat.id  # /language is private-chat only
+        if code in VOICE_LANGUAGES:
+            self.voice_languages[key] = code
+        else:
+            self.voice_languages.pop(key, None)
+        await query.answer()
+        await query.edit_message_text(
+            LANGUAGE_SET.format(language=VOICE_LANGUAGES.get(code, "auto-detect"))
+        )
+
     async def forward_to_staff(
         self,
         update: Update,
@@ -535,6 +662,7 @@ class ResidentBot:
         conversation: Conversation,
         text: str | None,
         photo: bool = False,
+        voice: bool = False,
     ) -> None:
         """While a staff member has taken over, pass the resident's messages to the staff
         group under the request card instead of answering with the AI."""
@@ -542,24 +670,25 @@ class ResidentBot:
         bot = context.bot
         if text and safety_signal(text):
             # Staff are in the chat, but a new emergency still gets the safety text at once.
-            await message.reply_text(EMERGENCY)
+            await message.reply_text(emergency_reply(conversation.language))
         name = conversation.resident.split(" (")[0]
         label = f"💬 {conversation.request_id} · {name}"
         conversation.last_resident_message_id = message.message_id
         if text:
-            conversation.resident_texts.append(text if not photo else f"[Photo] {text}")
+            said = text if not photo else f"[Photo] {text}"
+            conversation.said.append(ResidentMessage(said, said, voice))
         elif photo:
-            conversation.resident_texts.append("[Photo]")
+            conversation.said.append(ResidentMessage("[Photo]", "[Photo]"))
         self.save(conversation.key, conversation)
         if self.staff_chat_id is None:
             return
         try:
-            if photo:
+            if photo or voice:
                 sent = await bot.copy_message(
                     self.staff_chat_id,
                     update.effective_chat.id,
                     message.message_id,
-                    caption=f"{label}: {text}" if text else label,
+                    caption=f"{label}: {text}"[:1024] if text else label,
                     reply_to_message_id=conversation.staff_message_id,
                 )
             else:
@@ -667,6 +796,7 @@ class ResidentBot:
         context: ContextTypes.DEFAULT_TYPE,
         text: str,
         photo: bytes | None = None,
+        voice_file_id: str | None = None,
     ) -> None:
         """Classify a resident turn, reply, and update the staff card. Caller holds the lock."""
         message = update.effective_message
@@ -684,8 +814,8 @@ class ResidentBot:
         conversation.last_resident_message_id = message.message_id
         previous = conversation.last_result
         try:
-            # The classifier and Claude client are synchronous.
-            reply = await asyncio.to_thread(self.reply_for, key, text)
+            # The classifier, translators and Claude client are synchronous.
+            reply = await asyncio.to_thread(self.reply_for, key, text, voice_file_id is not None)
         except Exception:
             log.exception("Reply failed")
             reply = UNAVAILABLE
@@ -702,7 +832,7 @@ class ResidentBot:
         if self.keyboard(conversation) is not None:
             conversation.buttons_message_id = sent.message_id
         await self.react(bot, chat_id, message.message_id, conversation.status)
-        await self.notify_staff(bot, conversation)
+        await self.notify_staff(bot, conversation, voice_file_id=voice_file_id)
         if self.worth_tracking(conversation):
             await self.fetch_avatar(bot, user)
         if conversation.status == "answered":
@@ -779,7 +909,7 @@ class ResidentBot:
             )
 
     async def other(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.effective_message.reply_text(TEXT_ONLY)
+        await update.effective_message.reply_text(TEXT_OR_VOICE if self.transcriber else TEXT_ONLY)
 
     async def chat_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Setup helper: send /chatid in the staff group or channel to get STAFF_CHAT_ID."""
@@ -822,6 +952,10 @@ class ResidentBot:
         app.add_handler(
             MessageHandler(private & (filters.PHOTO | filters.Document.IMAGE), self.photo)
         )
+        if self.transcriber:
+            app.add_handler(CommandHandler("language", self.language, filters=private))
+            app.add_handler(CallbackQueryHandler(self.set_language, pattern=r"^lang:"))
+            app.add_handler(MessageHandler(private & filters.VOICE, self.voice))
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         app.add_handler(CallbackQueryHandler(self.button, pattern=r"^(submit|cancel|human):"))
         if self.staff_chat_id is not None:
@@ -890,6 +1024,8 @@ def build_bot() -> ResidentBot:
         backend = backend_with_fallback(backend_name, classifier_fallbacks)
         chat = build_chat(replies, chat_fallbacks)
         describer = PHOTO_PROVIDERS[photos].from_env() if photos != "off" else None
+        translator = translator_from_env()
+        transcriber = transcriber_from_env()
     except ValueError as exc:
         raise SystemExit(f"Check .env: {exc}") from exc
     staff_chat_id = os.getenv("STAFF_CHAT_ID", "").strip()
@@ -921,12 +1057,19 @@ def build_bot() -> ResidentBot:
     limit = os.getenv("BOT_TO_BOT_LIMIT", "3")
     if not limit.isdigit():
         raise SystemExit("BOT_TO_BOT_LIMIT must be a whole number (0 ignores other bots).")
+    if transcriber and not translator:
+        log.warning(
+            "TRANSCRIBE_WITH is set but TRANSLATE_WITH is not, so voice messages in other "
+            "languages reach the English classifier untranslated."
+        )
     log.info(
-        "Classifier: %s. Replies: %s. Photos: %s. FAQ: %s.",
+        "Classifier: %s. Replies: %s. Photos: %s. FAQ: %s. Translation: %s. Voice: %s.",
         " -> ".join(dict.fromkeys([backend_name, *classifier_fallbacks])),
         " -> ".join(dict.fromkeys([replies, *chat_fallbacks])),
         photos,
         f"{len(knowledge.facts)} entries" if knowledge else "off",
+        os.getenv("TRANSLATE_WITH") or "off",
+        os.getenv("TRANSCRIBE_WITH") or "off",
     )
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
@@ -937,6 +1080,8 @@ def build_bot() -> ResidentBot:
         describer,
         int(limit),
         knowledge,
+        translator,
+        transcriber,
     )
 
 

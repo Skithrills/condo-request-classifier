@@ -17,10 +17,13 @@ services:
     buildFilter:
       paths:
         - condo_classifier/**
+        - data/**
         - pyproject.toml
         - uv.lock
     envVars:
-      # Secrets: Render asks for these when the Blueprint is created.
+      # Secrets: Render asks for these when the Blueprint is created. For voice and
+      # Chinese/Malay/Tamil, add GROQ_API_KEY, TRANSLATE_WITH=groq and TRANSCRIBE_WITH=groq
+      # in the dashboard (the bot won't start if those are set without the key).
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: ANTHROPIC_API_KEY
@@ -28,6 +31,6 @@ services:
       - key: STAFF_CHAT_ID
         sync: false
       - key: BOT_REPLIES
-        value: chat
+        value: claude
       - key: CLASSIFIER_BACKEND
         value: baseline
