@@ -1,16 +1,22 @@
-"""Conversational replies to residents, written by Claude from the classifier's notes.
+"""Conversational replies to residents, written by an LLM from the classifier's notes.
 
-The classifier stays the source of truth for category, priority and review. Claude only
-words the reply and asks for missing details. Emergencies never reach this module.
+The classifier stays the source of truth for category, priority and review. The chat model
+only words the reply and asks for missing details. Emergencies never reach this module.
+Claude (ResidentChat) and a local Ollama model (OllamaChat) share the same `reply` method.
 """
 
 import logging
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import anthropic
+import httpx
+import ollama
 
+from condo_classifier.backends import check_ollama_host
+from condo_classifier.knowledge import Fact, knowledge_note
 from condo_classifier.schema import Classification
 from condo_classifier.taxonomy import LABELS
 
@@ -35,7 +41,10 @@ SYSTEM = (
     "- If the resident just says thanks, ok or bye, reply with a brief friendly closing and "
     "no question.\n"
     "- If they want a person, tell them to send /human.\n"
-    "- Answer simple follow-up questions about their request.\n\n"
+    "- Answer simple follow-up questions about their request.\n"
+    "- If the note includes building information, answer the resident's question from it "
+    "in one or two sentences, quoting times, fees and places exactly. Use only what it says; "
+    "if it doesn't cover the question, say the management office can confirm.\n\n"
     "Rules:\n"
     "- You cannot approve, book, pay, refund, grant access or dispatch anyone. Never say "
     "something is done, scheduled or approved, and never promise timelines.\n"
@@ -74,6 +83,8 @@ class Conversation:
     pending_photos: list[bytes] = field(default_factory=list)
     photos: list[str] = field(default_factory=list)
     staff_photos_sent: int = 0
+    # FAQ entries retrieved for the latest message, when it was a question they answer.
+    faq_facts: list[Fact] = field(default_factory=list)
     # Who this conversation belongs to (see telegram_bot.Key), and whether a staff member
     # has taken over: while they have, the AI stays quiet and messages go to staff.
     key: object = None
@@ -116,6 +127,13 @@ def classifier_note(result: Classification, escalated: bool) -> str:
     )
 
 
+def turn_note(conversation: Conversation, result: Classification) -> str:
+    note = classifier_note(result, conversation.escalated)
+    if conversation.faq_facts:
+        note += "\n\n" + knowledge_note(conversation.faq_facts)
+    return note
+
+
 class ResidentChat:
     def __init__(self, model: str = "claude-haiku-5-5", *, effort: str = "low", timeout=30.0):
         if effort not in {"low", "medium", "high"}:
@@ -140,7 +158,7 @@ class ResidentChat:
         turn = [
             {"role": "user", "content": text},
             # Mid-conversation system note: keeps classifier output out of the resident's turn.
-            {"role": "system", "content": classifier_note(result, conversation.escalated)},
+            {"role": "system", "content": turn_note(conversation, result)},
         ]
         try:
             response = self.client.messages.create(
@@ -163,9 +181,81 @@ class ResidentChat:
         reply = "".join(block.text for block in response.content if block.type == "text").strip()
         if not reply:
             return None
-        reply = reply[:MAX_REPLY_CHARS]
-        # Append-only history; drop whole old turns once the conversation gets long.
-        conversation.messages += turn + [{"role": "assistant", "content": reply}]
-        while len(conversation.messages) > MAX_MESSAGES:
-            del conversation.messages[:3]
-        return reply
+        return remember(conversation, turn, reply)
+
+
+def remember(conversation: Conversation, turn: list[dict], reply: str) -> str:
+    reply = reply[:MAX_REPLY_CHARS]
+    # Append-only history; drop whole old turns once the conversation gets long.
+    conversation.messages += turn + [{"role": "assistant", "content": reply}]
+    while len(conversation.messages) > MAX_MESSAGES:
+        del conversation.messages[:3]
+    return reply
+
+
+class OllamaChat:
+    """Replies from a model on an Ollama server, usually your own machine (no key needed)."""
+
+    def __init__(
+        self,
+        model: str,
+        host: str = "http://localhost:11434",
+        *,
+        api_key: str = "",
+        timeout: float = 60.0,
+    ):
+        if not model.strip():
+            raise ValueError("Enter an Ollama model name.")
+        headers = check_ollama_host(host, api_key)
+        self.model = model.strip()
+        self.client = ollama.Client(host=host.rstrip("/"), headers=headers, timeout=timeout)
+
+    @classmethod
+    def from_env(cls) -> "OllamaChat":
+        return cls(
+            model=os.getenv("OLLAMA_CHAT_MODEL") or os.getenv("OLLAMA_MODEL", "gemma3:4b"),
+            host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            api_key=os.getenv("OLLAMA_API_KEY", ""),
+            timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60")),
+        )
+
+    def reply(self, conversation: Conversation, text: str, result: Classification) -> str | None:
+        note = turn_note(conversation, result)
+        turn = [{"role": "user", "content": text}, {"role": "system", "content": note}]
+        # Chat templates of small local models often handle only one leading system
+        # message, so the current note joins the system prompt and older notes are left out.
+        history = [m for m in conversation.messages if m["role"] != "system"]
+        messages = [{"role": "system", "content": f"{SYSTEM}\n\n{note}"}, *history, turn[0]]
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=messages,
+                options={"temperature": 0.3, "num_predict": 200},
+            )
+        except (ollama.ResponseError, httpx.HTTPError, ConnectionError, TimeoutError) as exc:
+            log.warning("Ollama chat reply failed: %s", type(exc).__name__)
+            return None
+        reply = (response.message.content or "").strip()
+        if not reply:
+            return None
+        return remember(conversation, turn, reply)
+
+
+class ChatModel(Protocol):
+    def reply(
+        self, conversation: Conversation, text: str, result: Classification
+    ) -> str | None: ...
+
+
+class FallbackChat:
+    """Try each chat model in turn, e.g. Claude, then local Ollama when Claude fails."""
+
+    def __init__(self, *chats: ChatModel):
+        self.chats = chats
+
+    def reply(self, conversation: Conversation, text: str, result: Classification) -> str | None:
+        for chat in self.chats:
+            reply = chat.reply(conversation, text, result)
+            if reply is not None:
+                return reply
+        return None

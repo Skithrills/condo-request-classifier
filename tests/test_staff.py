@@ -179,8 +179,9 @@ def test_resident_confirmation_replaces_model_uncertainty_notes():
     from condo_classifier.staff import RESIDENT_CONFIRMED, review_notes
 
     reasons = [LOW_SCORE, UNCALIBRATED, "Location is missing."]
-    assert review_notes(reasons, "open") == reasons
-    assert review_notes(reasons, "ready") == reasons
+    assert review_notes(reasons, "open") == [LOW_SCORE, "Location is missing."]
+    assert review_notes(reasons, "ready") == [LOW_SCORE, "Location is missing."]
+    assert review_notes([UNCALIBRATED], "open") == []
     assert review_notes(reasons, "submitted") == ["Location is missing.", RESIDENT_CONFIRMED]
     assert review_notes(reasons, "with_staff") == ["Location is missing."]
     assert review_notes(["Urgent report requires staff triage."], "submitted") == [

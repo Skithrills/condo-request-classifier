@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Protocol
@@ -21,6 +22,8 @@ from condo_classifier.taxonomy import taxonomy_prompt
 
 ROOT = Path(__file__).resolve().parents[1]
 TRAIN_PATH = ROOT / "data" / "train.csv"
+
+log = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -119,26 +122,32 @@ def ground_decision(result: ModelDecision, request: ResidentRequest) -> ModelDec
     return result
 
 
+def check_ollama_host(host: str, api_key: str = "") -> dict[str, str]:
+    """Validate an Ollama server address and return the request headers for it."""
+    parsed = urlparse(host)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Use an http(s) Ollama server address.")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("Keep credentials in OLLAMA_API_KEY, not the server address.")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("Use the server origin without an /api path.")
+    if parsed.hostname == "ollama.com" and parsed.scheme != "https":
+        raise ValueError("Ollama Cloud requires HTTPS.")
+    if parsed.hostname == "ollama.com" and not api_key:
+        raise ValueError("Set OLLAMA_API_KEY in your local .env file for Ollama Cloud.")
+    # A local server needs no key; only Ollama Cloud does.
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
 class OllamaBackend:
     def __init__(self, host: str, model: str, *, api_key: str = "", timeout: float = 45):
-        parsed = urlparse(host)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("Use an http(s) Ollama server address.")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("Keep credentials in OLLAMA_API_KEY, not the server address.")
-        if parsed.path not in {"", "/"}:
-            raise ValueError("Use the server origin without an /api path.")
+        headers = check_ollama_host(host, api_key)
         if not model.strip():
             raise ValueError("Enter an Ollama model name.")
-        self.is_cloud = parsed.hostname == "ollama.com" or model.strip().endswith(
+        self.is_cloud = urlparse(host).hostname == "ollama.com" or model.strip().endswith(
             (":cloud", "-cloud")
         )
-        if parsed.hostname == "ollama.com" and parsed.scheme != "https":
-            raise ValueError("Ollama Cloud requires HTTPS.")
-        if parsed.hostname == "ollama.com" and not api_key:
-            raise ValueError("Set OLLAMA_API_KEY in your local .env file for Ollama Cloud.")
         self.model = model.strip()
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         options = dict(
             model=self.model,
             base_url=host.rstrip("/"),
@@ -266,6 +275,22 @@ class ClaudeBackend:
         raise ProviderError("Claude returned invalid output twice. Staff review is required.")
 
 
+class FallbackBackend:
+    """Use a second backend when the first fails, e.g. Claude out of credits -> local Ollama."""
+
+    def __init__(self, primary: Backend, fallback: Backend):
+        self.primary = primary
+        self.fallback = fallback
+
+    def predict(self, request: ResidentRequest) -> Prediction:
+        try:
+            return self.primary.predict(request)
+        except ProviderError as exc:
+            log.warning("Classifier backend failed (%s); using the fallback", exc)
+            # The prediction's backend field records which one answered.
+            return self.fallback.predict(request)
+
+
 BACKENDS = ("baseline", "ollama", "claude")
 
 
@@ -277,3 +302,25 @@ def backend_from_name(name: str) -> Backend:
     if name == "claude":
         return ClaudeBackend.from_env()
     raise ValueError(f"Backend must be one of: {', '.join(BACKENDS)}.")
+
+
+def parse_fallbacks(value: str) -> list[str]:
+    """CLASSIFIER_FALLBACK: backends to try in order when the main one fails, or none."""
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    if names in ([], ["none"]):
+        return []
+    for name in names:
+        if name not in BACKENDS:
+            raise ValueError(
+                f"CLASSIFIER_FALLBACK must be none or a list of: {', '.join(BACKENDS)}."
+            )
+    return names
+
+
+def backend_with_fallback(name: str, fallbacks: list[str]) -> Backend:
+    """The named backend, then each fallback in turn, e.g. claude -> ollama -> baseline."""
+    chain = list(dict.fromkeys([name, *fallbacks]))
+    backend = backend_from_name(chain[-1])
+    for earlier in reversed(chain[:-1]):
+        backend = FallbackBackend(backend_from_name(earlier), backend)
+    return backend

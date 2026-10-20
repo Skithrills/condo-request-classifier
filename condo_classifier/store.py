@@ -17,6 +17,7 @@ STATUSES = (
     "with_staff",
     "in_progress",
     "resolved",
+    "answered",
     "emergency",
     "cancelled",
 )

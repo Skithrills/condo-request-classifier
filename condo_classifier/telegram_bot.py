@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -39,13 +40,17 @@ from telegram.ext import (
     filters,
 )
 
-from condo_classifier.backends import ROOT, backend_from_name
+from condo_classifier.backends import ROOT, backend_with_fallback, parse_fallbacks
 from condo_classifier.chat import (
     IDLE_RESET_SECONDS,
+    ChatModel,
     Conversation,
+    FallbackChat,
+    OllamaChat,
     ResidentChat,
     ready_to_submit,
 )
+from condo_classifier.knowledge import FAQ_PATH, KnowledgeBase, looks_like_question
 from condo_classifier.replies import (
     CANCELLED,
     EMERGENCY,
@@ -86,6 +91,7 @@ from condo_classifier.store import (
 )
 from condo_classifier.vision import (
     ClaudePhotoDescriber,
+    OllamaPhotoDescriber,
     PhotoDescriber,
     photo_message,
     prepare_image,
@@ -156,17 +162,19 @@ class ResidentBot:
     def __init__(
         self,
         classifier: Classifier,
-        chat: ResidentChat | None = None,
+        chat: ChatModel | None = None,
         staff_chat_id: int | None = None,
         store: RequestStore | None = None,
         describer: PhotoDescriber | None = None,
         bot_to_bot_limit: int = 3,
+        knowledge: KnowledgeBase | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
         self.staff_chat_id = staff_chat_id
         self.store = store
         self.describer = describer
+        self.knowledge = knowledge
         self.conversations: dict[Key, Conversation] = {}
         self.locks: dict[Key, asyncio.Lock] = {}
         # Loop guard for groups shared with other bots: recent replies to bots, per chat.
@@ -197,10 +205,18 @@ class ResidentBot:
         result = self.classifier.classify(request)
         conversation.last_result = result
         conversation.request_id = conversation.request_id or new_request_id()
-        if result.status == "safety_escalation" or conversation.escalated:
+        # Common questions are answered from the building FAQ. Emergencies never are.
+        emergency = result.status == "safety_escalation" or conversation.escalated
+        conversation.faq_facts = []
+        if self.knowledge is not None and not emergency and looks_like_question(text):
+            conversation.faq_facts = self.knowledge.search(text)
+        if emergency:
             conversation.status = "emergency"
         elif conversation.human_requested:
             conversation.status = "needs_human"
+        elif conversation.faq_facts and len(conversation.resident_texts) == 1:
+            # A standalone question, not a request: answer it and log it, no work order.
+            conversation.status = "answered"
         else:
             conversation.status = "ready" if ready_to_submit(result) else "open"
         log.info(
@@ -218,7 +234,10 @@ class ResidentBot:
         elif self.chat and result.status != "provider_error":
             reply = self.chat.reply(conversation, text, result)
         if reply is None:
-            reply = resident_reply(result)
+            if conversation.faq_facts and result.status != "safety_escalation":
+                reply = conversation.faq_facts[0].answer
+            else:
+                reply = resident_reply(result)
             conversation.messages += [
                 {"role": "user", "content": text},
                 {"role": "assistant", "content": reply},
@@ -336,6 +355,8 @@ class ResidentBot:
         result = conversation.last_result
         if self.staff_chat_id is None or not self.worth_tracking(conversation):
             return
+        if conversation.status == "answered":
+            return  # answered from the FAQ; nothing for staff to do
         card = staff_card(
             conversation.request_id,
             conversation.resident,
@@ -684,6 +705,9 @@ class ResidentBot:
         await self.notify_staff(bot, conversation)
         if self.worth_tracking(conversation):
             await self.fetch_avatar(bot, user)
+        if conversation.status == "answered":
+            # A standalone question answered from the FAQ is done; start fresh next time.
+            self.conversations.pop(key, None)
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -811,21 +835,61 @@ class ResidentBot:
         return app
 
 
+CHAT_PROVIDERS = {"claude": ResidentChat, "ollama": OllamaChat}
+PHOTO_PROVIDERS = {"claude": ClaudePhotoDescriber, "ollama": OllamaPhotoDescriber}
+
+
+def build_chat(replies: str, fallbacks: list[str]) -> ChatModel | None:
+    """BOT_REPLIES picks the chat model; CHAT_FALLBACK lists models to try when it fails."""
+    if replies == "fixed":
+        return None
+    chats = [CHAT_PROVIDERS[name].from_env() for name in dict.fromkeys([replies, *fallbacks])]
+    return chats[0] if len(chats) == 1 else FallbackChat(*chats)
+
+
 def build_bot() -> ResidentBot:
     """Build the bot from .env, exiting with a plain message when setup is incomplete."""
     backend_name = os.getenv("CLASSIFIER_BACKEND", "baseline")
-    replies = os.getenv("BOT_REPLIES", "chat")
-    if replies not in {"chat", "fixed"}:
-        raise SystemExit("BOT_REPLIES must be chat or fixed.")
-    needs_claude = replies == "chat" or backend_name == "claude"
-    if needs_claude and not os.getenv("ANTHROPIC_API_KEY"):
+    replies = os.getenv("BOT_REPLIES", "claude")
+    replies = {"chat": "claude"}.get(replies, replies)  # older .env files say "chat"
+    if replies not in {*CHAT_PROVIDERS, "fixed"}:
+        raise SystemExit("BOT_REPLIES must be claude, ollama or fixed.")
+    chat_fallbacks = [
+        name.strip() for name in os.getenv("CHAT_FALLBACK", "none").split(",") if name.strip()
+    ]
+    chat_fallbacks = [] if chat_fallbacks == ["none"] else chat_fallbacks
+    if any(name not in CHAT_PROVIDERS for name in chat_fallbacks):
+        raise SystemExit("CHAT_FALLBACK must be none, claude or ollama.")
+    photos = os.getenv("PHOTOS", "claude")
+    photos = {"on": "claude"}.get(photos, photos)  # older .env files say "on"
+    if photos not in {*PHOTO_PROVIDERS, "off"}:
+        raise SystemExit("PHOTOS must be claude, ollama or off.")
+    try:
+        classifier_fallbacks = parse_fallbacks(os.getenv("CLASSIFIER_FALLBACK", "baseline"))
+    except ValueError as exc:
+        raise SystemExit(f"Check .env: {exc}") from exc
+    if replies == "fixed":
+        chat_fallbacks = []
+    uses_claude = "claude" in {backend_name, *classifier_fallbacks, replies, *chat_fallbacks}
+    if photos == "claude" and not os.getenv("ANTHROPIC_API_KEY"):
+        # Photos are optional: without a key they're simply off.
+        log.warning("Photos are off: set ANTHROPIC_API_KEY, or PHOTOS=ollama with a vision model.")
+        photos = "off"
+    if photos == "ollama" and not os.getenv("OLLAMA_VISION_MODEL"):
+        log.warning(
+            "Photos are off: set OLLAMA_VISION_MODEL to a vision model (e.g. gemma3:4b). "
+            "Text-only models such as phi4-mini can't see photos."
+        )
+        photos = "off"
+    if uses_claude and not os.getenv("ANTHROPIC_API_KEY"):
         raise SystemExit(
-            "Set ANTHROPIC_API_KEY in .env for Claude chat replies, "
-            "or set BOT_REPLIES=fixed to run without Claude."
+            "Set ANTHROPIC_API_KEY in .env to use Claude, or switch to local models: "
+            "CLASSIFIER_BACKEND=ollama and BOT_REPLIES=ollama (no key needed)."
         )
     try:
-        backend = backend_from_name(backend_name)
-        chat = ResidentChat.from_env() if replies == "chat" else None
+        backend = backend_with_fallback(backend_name, classifier_fallbacks)
+        chat = build_chat(replies, chat_fallbacks)
+        describer = PHOTO_PROVIDERS[photos].from_env() if photos != "off" else None
     except ValueError as exc:
         raise SystemExit(f"Check .env: {exc}") from exc
     staff_chat_id = os.getenv("STAFF_CHAT_ID", "").strip()
@@ -839,13 +903,14 @@ def build_bot() -> ResidentBot:
             "Add the bot to the staff group and send /chatid there to get the ID."
         )
     store = RequestStore(default_store_path())
-    describer = None
-    if os.getenv("PHOTOS", "on") == "on" and os.getenv("ANTHROPIC_API_KEY"):
+    knowledge = None
+    if os.getenv("FAQ", "on") == "on":
         try:
-            describer = ClaudePhotoDescriber.from_env()
-        except ValueError as exc:
-            raise SystemExit(f"Check .env: {exc}") from exc
-    log.info("Photos: %s.", "on" if describer else "off")
+            knowledge = KnowledgeBase(Path(os.getenv("FAQ_PATH") or FAQ_PATH))
+        except (OSError, ValueError, KeyError) as exc:
+            raise SystemExit(f"Could not load the FAQ file: {exc}") from exc
+    elif os.getenv("FAQ") != "off":
+        raise SystemExit("FAQ must be on or off.")
     try:
         threshold = float(os.getenv("REVIEW_THRESHOLD", "0.60"))
         classifier = Classifier(backend, review_threshold=threshold)
@@ -856,7 +921,13 @@ def build_bot() -> ResidentBot:
     limit = os.getenv("BOT_TO_BOT_LIMIT", "3")
     if not limit.isdigit():
         raise SystemExit("BOT_TO_BOT_LIMIT must be a whole number (0 ignores other bots).")
-    log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
+    log.info(
+        "Classifier: %s. Replies: %s. Photos: %s. FAQ: %s.",
+        " -> ".join(dict.fromkeys([backend_name, *classifier_fallbacks])),
+        " -> ".join(dict.fromkeys([replies, *chat_fallbacks])),
+        photos,
+        f"{len(knowledge.facts)} entries" if knowledge else "off",
+    )
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
         classifier,
@@ -865,6 +936,7 @@ def build_bot() -> ResidentBot:
         store,
         describer,
         int(limit),
+        knowledge,
     )
 
 
