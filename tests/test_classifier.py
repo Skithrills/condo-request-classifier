@@ -57,6 +57,10 @@ def test_invalid_input_rejected(text):
         "Someone is attacking a resident.",
         "No gas leak, but my child is trapped in the lift.",
         "What happens during a fire drill? The lobby is on fire now!",
+        "the lift at block B is stuck and someone is inside!",
+        "Elevator stuck with my son inside",
+        "lift stuck between floors, my kid is in it",
+        "My mum is in the lift and it's stuck",
     ],
 )
 def test_emergency_does_not_wait_for_backend(text):
@@ -87,6 +91,9 @@ def test_emergency_does_not_wait_for_backend(text):
         "Where can I read the fire evacuation plan?",
         "The gas leak was resolved yesterday.",
         "What happens during a fire drill?",
+        "The lift is stuck on level 3",
+        "The lift keeps stopping between floors and the doors take ages to open",
+        "Lift B is stuck, nobody inside",
     ],
 )
 def test_hypothetical_and_negated_reports_not_emergencies(text):

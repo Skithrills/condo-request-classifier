@@ -35,6 +35,21 @@ EMERGENCY_PATTERNS = (
         Category.MAINTENANCE,
         r"\b(?:trapped|stuck) (?:inside |in )(?:the |a |our )?(?:lift|elevator)\b",
     ),
+    # The lift named first: "the lift is stuck and someone is inside", "elevator stuck with
+    # my son in it". A stuck lift with nobody in it stays a normal repair.
+    (
+        Category.MAINTENANCE,
+        r"\b(?:lift|elevator)s?\b.{0,40}?\b(?:stuck|stopped|jammed|broke down|broken down)\b"
+        r".{0,40}?\b(?:someone|somebody|people|persons?|passengers?|residents?|kids?|"
+        r"child(?:ren)?|son|daughter|baby|mum|mom|mother|dad|father|grandma|grandpa|elderly|"
+        r"i'm|i am|we're|we are)\b",
+    ),
+    (
+        Category.MAINTENANCE,
+        r"\b(?:someone|somebody|people|kids?|child(?:ren)?|son|daughter|baby|mum|mom|mother|"
+        r"dad|father|grandma|grandpa|i'm|i am|we're|we are)\b.{0,30}?\b(?:in|inside) "
+        r"(?:the |a |our )?(?:lift|elevator)\b.{0,30}?\b(?:stuck|stopped|jammed)\b",
+    ),
     (Category.MAINTENANCE, r"\b(?:sparks|sparking|exposed live wire|electrocut\w*)\b"),
     (Category.SECURITY, r"\b(?:attacking|assaulting|unconscious|not breathing)\b"),
     # Injuries and medical emergencies: a person who is hurt right now.
