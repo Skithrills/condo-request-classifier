@@ -130,3 +130,38 @@ def test_reports_and_emergencies_are_not_answered_from_the_faq(baseline, knowled
     call = send(bot, tg, "Is the fire alarm supposed to ring? There's smoke in the lift lobby")
     assert "emergency number" in call.args[0]
     assert all(conversation.faq_facts == [] for conversation in bot.conversations.values())
+
+
+def test_follow_up_question_keeps_the_faq_topic(baseline, knowledge, tmp_path):
+    seen = []
+
+    class Chat:
+        def reply(self, conversation, text, result):
+            seen.append((conversation.status, [f.id for f in conversation.faq_facts]))
+            seen.append(list(conversation.messages))
+            conversation.messages.append({"role": "assistant", "content": "ok"})
+            return "ok"
+
+    bot, store = make_bot(baseline, knowledge, tmp_path, Chat())
+    tg = fake_bot()
+    send(bot, tg, "when does the gym close?")
+    # Matches no entry on its own; it means the gym just answered.
+    call = send(bot, tg, "can my 15 year old son enter?")
+    status, facts = seen[2]
+    assert status == "answered" and "gym-hours" in facts
+    assert seen[3], "the earlier gym exchange is kept as context"
+    assert call.kwargs.get("reply_markup") is None
+    assert {record.status for record in store.all()} == {"answered"}
+    tg.send_message.assert_not_called()
+
+
+def test_a_second_question_is_still_a_question(baseline, knowledge, tmp_path):
+    bot, store = make_bot(baseline, knowledge, tmp_path)
+    tg = fake_bot()
+    send(bot, tg, "can my son come in?")
+    call = send(bot, tg, "can my 15 year old son enter the condo's gym?")
+    # The chat model gets both top entries; the gym one must be among them.
+    facts = knowledge.search("can my 15 year old son enter the condo's gym?")
+    assert "gym-hours" in [fact.id for fact in facts]
+    assert call.kwargs.get("reply_markup") is None
+    assert store.all()[-1].status == "answered"

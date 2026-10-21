@@ -126,6 +126,8 @@ MAX_PHOTO_BYTES = 10 * 1024 * 1024
 BOT_TO_BOT_WINDOW = 10 * 60
 # Saved copies for staff: big enough to see small defects, small enough to keep.
 SAVED_PHOTO_EDGE = 2048
+# How long a follow-up question ("can my son use it?") still refers to the last FAQ answer.
+FAQ_FOLLOW_UP_SECONDS = 10 * 60
 MAX_VOICE_SECONDS = 120
 
 
@@ -200,6 +202,9 @@ class ResidentBot:
         # so a staff member's reply reaches the right resident.
         self.staff_threads: dict[int, Key] = {}
         self.avatars_checked: set[int] = set()
+        # The last FAQ exchange per conversation key: (time, chat history, facts), so a
+        # follow-up question keeps its topic after the answered conversation is closed.
+        self.recent_faq: dict[Key, tuple[float, list[dict], list]] = {}
         # Voice language each resident picked with /language. Survives /new, not restarts.
         self.voice_languages: dict[Key, str] = {}
 
@@ -247,12 +252,16 @@ class ResidentBot:
         conversation.faq_facts = []
         if self.knowledge is not None and not emergency and looks_like_question(text):
             conversation.faq_facts = self.knowledge.search(text)
+            if len(conversation.said) == 1:
+                self.follow_up(key, conversation)
         if emergency:
             conversation.status = "emergency"
         elif conversation.human_requested:
             conversation.status = "needs_human"
-        elif conversation.faq_facts and len(conversation.resident_texts) == 1:
-            # A standalone question, not a request: answer it and log it, no work order.
+        elif conversation.faq_facts and all(
+            looks_like_question(message.english) for message in conversation.said
+        ):
+            # Only questions so far, not a request: answer and log it, no work order.
             conversation.status = "answered"
         else:
             conversation.status = "ready" if ready_to_submit(result) else "open"
@@ -283,6 +292,16 @@ class ResidentBot:
                 {"role": "assistant", "content": reply},
             ]
         return reply
+
+    def follow_up(self, key: Key, conversation: Conversation) -> None:
+        """A question right after an FAQ answer may lean on it ("can my son use it?"): keep
+        that exchange as context, and its facts when the question alone matches none."""
+        recent = self.recent_faq.get(key)
+        if recent is None or time.monotonic() - recent[0] > FAQ_FOLLOW_UP_SECONDS:
+            return
+        _, messages, facts = recent
+        conversation.messages = list(messages)
+        conversation.faq_facts = conversation.faq_facts or list(facts)
 
     @staticmethod
     def worth_tracking(conversation: Conversation) -> bool:
@@ -486,10 +505,12 @@ class ResidentBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         self.conversations.pop(self.key(update), None)
+        self.recent_faq.pop(self.key(update), None)
         await update.effective_message.reply_text(WELCOME)
 
     async def new(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         self.conversations.pop(self.key(update), None)
+        self.recent_faq.pop(self.key(update), None)
         await update.effective_message.reply_text(NEW_REQUEST)
 
     async def text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -836,7 +857,13 @@ class ResidentBot:
         if self.worth_tracking(conversation):
             await self.fetch_avatar(bot, user)
         if conversation.status == "answered":
-            # A standalone question answered from the FAQ is done; start fresh next time.
+            # A question answered from the FAQ is done; start fresh next time, keeping the
+            # exchange for a follow-up question.
+            self.recent_faq[key] = (
+                time.monotonic(),
+                conversation.messages,
+                conversation.faq_facts,
+            )
             self.conversations.pop(key, None)
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

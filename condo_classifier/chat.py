@@ -43,8 +43,10 @@ SYSTEM = (
     "- If they want a person, tell them to send /human.\n"
     "- Answer simple follow-up questions about their request.\n"
     "- If the note includes building information, answer the resident's question from it "
-    "in one or two sentences, quoting times, fees and places exactly. Use only what it says; "
-    "if it doesn't cover the question, say the management office can confirm.\n\n"
+    "in one or two sentences, quoting times, fees and places exactly. Apply it to their "
+    "situation and answer directly (for example yes or no, and the condition), instead of "
+    "saying you can't confirm. Use only what it says; if it doesn't cover the question, say "
+    "the management office can confirm.\n\n"
     "Rules:\n"
     "- You cannot approve, book, pay, refund, grant access or dispatch anyone. Never say "
     "something is done, scheduled or approved, and never promise timelines.\n"
@@ -147,7 +149,14 @@ def classifier_note(result: Classification, escalated: bool) -> str:
 
 
 def turn_note(conversation: Conversation, result: Classification) -> str:
-    note = classifier_note(result, conversation.escalated)
+    if conversation.status == "answered":
+        # A general question, not a request: the classifier's fields would only mislead.
+        note = (
+            "This is a general question, not a request. Answer it from the building "
+            "information below. Don't ask for a location or mention Submit."
+        )
+    else:
+        note = classifier_note(result, conversation.escalated)
     if conversation.faq_facts:
         note += "\n\n" + knowledge_note(conversation.faq_facts)
     return note
