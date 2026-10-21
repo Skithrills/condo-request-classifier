@@ -14,7 +14,7 @@ from condo_classifier.store import RequestStore
 
 pytest.importorskip("telegram")
 from condo_classifier.telegram_bot import ResidentBot  # noqa: E402
-from tests.test_buttons import STAFF, fake_bot, send  # noqa: E402
+from tests.test_buttons import STAFF, command, fake_bot, send  # noqa: E402
 
 EVAL_PATH = Path(__file__).resolve().parents[1] / "data" / "faq_eval.csv"
 
@@ -69,6 +69,8 @@ def test_bot_answers_questions_but_not_reports(knowledge):
         ("The lift at Block C is stuck", False),
         ("Water is leaking from my ceiling at #05-12", False),
         ("I was charged twice for my maintenance fee", False),
+        ("my aircon is leaking and there is mould when i checked behind it", False),
+        ("i want to know when the gym closes", True),
     ],
 )
 def test_question_gate(text, question):
@@ -165,3 +167,35 @@ def test_a_second_question_is_still_a_question(baseline, knowledge, tmp_path):
     assert "gym-hours" in [fact.id for fact in facts]
     assert call.kwargs.get("reply_markup") is None
     assert store.all()[-1].status == "answered"
+
+
+def test_report_with_when_in_it_is_not_answered_from_the_faq(baseline, knowledge, tmp_path):
+    bot, store = make_bot(baseline, knowledge, tmp_path)
+    tg = fake_bot()
+    send(bot, tg, "my aircon is leaking water and there is mould when i checked around the back")
+    assert bot.conversations[1].status != "answered"
+    request_id = bot.conversations[1].request_id
+    assert request_id in command(bot, tg, bot.human)
+    assert store.get(request_id).status == "needs_human"
+
+
+def test_human_right_after_an_faq_answer_hands_that_question_over(baseline, knowledge, tmp_path):
+    bot, store = make_bot(baseline, knowledge, tmp_path)
+    tg = fake_bot()
+    send(bot, tg, "Can I install my air-con on the ledge?")
+    assert bot.conversations == {}
+    reply = command(bot, tg, bot.human)
+    request_id = store.all()[0].id
+    assert request_id in reply
+    assert store.get(request_id).status == "needs_human"
+    assert tg.send_message.call_args.args[1].startswith("🙋 Resident wants a person")
+
+
+def test_human_with_words_starts_the_request_and_hands_it_over(baseline, knowledge, tmp_path):
+    bot, store = make_bot(baseline, knowledge, tmp_path)
+    tg = fake_bot()
+    reply = command(bot, tg, bot.human, ["aircon", "leaking", "with", "mould"])
+    assert "first" not in reply
+    record = store.all()[0]
+    assert record.status == "needs_human"
+    assert record.messages == ["aircon leaking with mould"]

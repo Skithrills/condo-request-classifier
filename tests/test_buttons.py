@@ -121,14 +121,17 @@ def test_cancel_and_stale_buttons(baseline, tmp_path):
     assert query.answer.call_args.args[0] == STALE
 
 
-def command(bot, tg, handler):
-    message = SimpleNamespace(reply_text=AsyncMock(return_value=SimpleNamespace(message_id=600)))
+def command(bot, tg, handler, args=()):
+    message = SimpleNamespace(
+        message_id=599,
+        reply_text=AsyncMock(return_value=SimpleNamespace(message_id=600)),
+    )
     update = SimpleNamespace(
         effective_message=message,
         effective_chat=SimpleNamespace(id=1, type="private"),
         effective_user=USER,
     )
-    asyncio.run(handler(update, SimpleNamespace(bot=tg)))
+    asyncio.run(handler(update, SimpleNamespace(bot=tg, args=list(args))))
     return message.reply_text.call_args.args[0]
 
 

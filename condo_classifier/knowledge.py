@@ -23,7 +23,10 @@ FAQ_PATH = ROOT / "data" / "condo_faq.csv"
 DEFAULT_THRESHOLD = 0.20
 
 QUESTION = re.compile(
-    r"\?|\b(?:what|whats|what's|when|where|which|who|how|why)\b|"
+    r"\?|"
+    # A question word opening the message or a clause: "...mould when i checked" is a report.
+    r"(?:^|[.!,;:]\s*|\b(?:know|tell me|wondering|ask|asking)\s+)"
+    r"(?:what|whats|what's|when|where|which|who|how|why)\b|"
     r"^\s*(?:can|could|may|is|are|do|does|did|will|would|should)\b|"
     r"\b(?:can|could|may|should|do|does|did|is|are|will|would)\s+(?:i|we|my|our|you|the|it|there|guests?)\b|"
     r"\bwhat do i do\b|\bhow (?:do|can|much|long)\b|\bi want to (?:know|book|hold|reserve)\b",

@@ -131,7 +131,10 @@ STALE = "This request is already closed."
 
 NOT_FOR_YOU = "These buttons are for the person who made this request."
 
-HUMAN_FIRST = "Tell me briefly what it's about first, then send /human and I'll get a staff member."
+HUMAN_FIRST = (
+    "Tell me briefly what it's about first, or send it with the command, like "
+    "/human aircon leaking. Then I'll get a staff member."
+)
 
 HUMAN_ALREADY = "A staff member has already been asked to take over. They'll contact you."
 

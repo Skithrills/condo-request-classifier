@@ -202,9 +202,9 @@ class ResidentBot:
         # so a staff member's reply reaches the right resident.
         self.staff_threads: dict[int, Key] = {}
         self.avatars_checked: set[int] = set()
-        # The last FAQ exchange per conversation key: (time, chat history, facts), so a
-        # follow-up question keeps its topic after the answered conversation is closed.
-        self.recent_faq: dict[Key, tuple[float, list[dict], list]] = {}
+        # The last conversation answered from the FAQ, with when it closed: a follow-up
+        # question keeps its topic, and /human can still hand it to staff.
+        self.recent_faq: dict[Key, tuple[float, Conversation]] = {}
         # Voice language each resident picked with /language. Survives /new, not restarts.
         self.voice_languages: dict[Key, str] = {}
 
@@ -299,9 +299,9 @@ class ResidentBot:
         recent = self.recent_faq.get(key)
         if recent is None or time.monotonic() - recent[0] > FAQ_FOLLOW_UP_SECONDS:
             return
-        _, messages, facts = recent
-        conversation.messages = list(messages)
-        conversation.faq_facts = conversation.faq_facts or list(facts)
+        previous = recent[1]
+        conversation.messages = list(previous.messages)
+        conversation.faq_facts = conversation.faq_facts or list(previous.faq_facts)
 
     @staticmethod
     def worth_tracking(conversation: Conversation) -> bool:
@@ -859,11 +859,7 @@ class ResidentBot:
         if conversation.status == "answered":
             # A question answered from the FAQ is done; start fresh next time, keeping the
             # exchange for a follow-up question.
-            self.recent_faq[key] = (
-                time.monotonic(),
-                conversation.messages,
-                conversation.faq_facts,
-            )
+            self.recent_faq[key] = (time.monotonic(), conversation)
             self.conversations.pop(key, None)
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -920,6 +916,15 @@ class ResidentBot:
         message = update.effective_message
         async with self.lock(key):
             conversation = self.conversations.get(key)
+            if conversation is None and context.args:
+                # "/human aircon leaking": treat the words as the request, then hand it over.
+                await self.respond(update, context, " ".join(context.args))
+                conversation = self.conversations.get(key)
+            if conversation is None:
+                # Just answered from the FAQ and closed: hand that conversation over instead.
+                recent = self.recent_faq.pop(key, None)
+                if recent is not None and time.monotonic() - recent[0] <= FAQ_FOLLOW_UP_SECONDS:
+                    conversation = self.conversations[key] = recent[1]
             if conversation is None or conversation.last_result is None:
                 await message.reply_text(HUMAN_FIRST)
                 return
