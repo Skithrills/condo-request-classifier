@@ -491,6 +491,19 @@ real resident use.
 | `TRANSCRIBE_WITH` | not set | `groq` and/or `local`, tried in order; turns voice messages on |
 | `GROQ_TRANSLATE_MODEL` / `GROQ_WHISPER_MODEL` | `openai/gpt-oss-120b` / `whisper-large-v3` | Groq models |
 | `LOCAL_WHISPER_MODEL` | `large-v3-turbo` | faster-whisper model; `small` for slower computers |
+| `DAILY_MESSAGE_LIMIT` | `20` | Messages per resident per day; `0` turns the limit off |
+| `BOT_UNLIMITED_IDS` | not set | Comma-separated Telegram IDs that are never limited |
+
+Past the daily limit the bot stops calling Claude and replies with buttons instead:
+**Emergency**, **Repair / work order**, **Question** and **Ask office to contact me**.
+The tapped button sets the category, and the resident's held messages go to the staff
+chat unclassified. Emergency always works; the other buttons allow 3 requests an hour.
+Messages that trip the rule-based emergency screen are still escalated as usual.
+Past the limit, photos are not described (only their caption is held) and voice
+messages are still transcribed so staff can read them.
+In the staff chat, send
+`/unlimit <Telegram ID>` to lift a resident's limit, or `/relimit <Telegram ID>`
+to restore it; the ID is on each request card. Limits reset when the bot restarts.
 
 Message text and audio are never logged. Claude's system prompt (`SYSTEM`) lives in
 `condo_classifier/chat.py`; fixed replies and button texts live in

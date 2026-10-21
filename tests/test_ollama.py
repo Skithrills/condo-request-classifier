@@ -27,7 +27,6 @@ VALID = {
         {"priority": "urgent"},
         {"confidence": 1.2},
         {"confidence": float("nan")},
-        {"location": "Block X"},
         {"evidence": ["A gas pipe has burst"]},
         {"approve_payment": True},
     ],
@@ -35,6 +34,12 @@ VALID = {
 def test_invalid_model_decision_rejected(change):
     with pytest.raises(ValueError):
         parse_model_decision(json.dumps({**VALID, **change}), REQUEST)
+
+
+def test_paraphrased_location_is_dropped():
+    decision = parse_model_decision(json.dumps({**VALID, "location": "Block X"}), REQUEST)
+    assert decision.location is None
+    assert decision.category == "maintenance"
 
 
 def test_json_fences_supported_without_accepting_trailing_prose():

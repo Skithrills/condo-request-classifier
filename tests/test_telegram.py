@@ -67,11 +67,11 @@ def test_provider_error_reply():
     assert resident_reply(make_result(status="provider_error")) == UNAVAILABLE
 
 
-def bot_with(classifier, chat=None):
+def bot_with(classifier, chat=None, **options):
     pytest.importorskip("telegram")
     from condo_classifier.telegram_bot import ResidentBot
 
-    return ResidentBot(classifier, chat)
+    return ResidentBot(classifier, chat, **options)
 
 
 def test_fixed_replies_end_to_end(baseline):
@@ -141,6 +141,8 @@ def test_idle_conversation_resets(baseline, monkeypatch):
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "claude"}, "ANTHROPIC_API_KEY"),
         ({"BOT_REPLIES": "loud"}, "claude, ollama or fixed"),
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "gpt"}, "Check .env"),
+        ({"BOT_REPLIES": "fixed", "DAILY_MESSAGE_LIMIT": "lots"}, "DAILY_MESSAGE_LIMIT"),
+        ({"BOT_REPLIES": "fixed", "BOT_UNLIMITED_IDS": "me"}, "BOT_UNLIMITED_IDS"),
     ],
 )
 def test_build_bot_explains_missing_setup(monkeypatch, env, message):

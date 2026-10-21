@@ -5,6 +5,8 @@ All included messages are synthetic and hand-authored for this project.
 - `train.csv`: 140 examples, 14 for each of ten categories. Used by the baseline only.
 - `evaluation.csv`: 55 separate examples with category and priority labels. Never trained on.
 - `batch_example.csv`: four demo requests for the upload workflow.
+- `silly_requests.csv`: 30 absurd or tricky resident messages labelled question,
+  work_order, emergency or rejection, for stress-testing the bot's routing.
 
 CSV messages that contain commas must be quoted. Label keys must match
 `condo_classifier/schema.py`. Real data should be redacted and kept under

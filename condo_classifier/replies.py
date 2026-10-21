@@ -1,6 +1,7 @@
 """Resident-facing reply text. Kept free of Telegram imports so any chat channel can reuse it."""
 
 import re
+from typing import NamedTuple
 
 from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.taxonomy import LABELS
@@ -82,6 +83,52 @@ EMERGENCY_TRANSLATIONS["id"] = EMERGENCY_TRANSLATIONS["ms"]  # Close enough to b
 def emergency_reply(language: str | None = None) -> str:
     translated = EMERGENCY_TRANSLATIONS.get(language or "")
     return f"{translated}\n\n{EMERGENCY}" if translated else EMERGENCY
+
+
+LIMIT_REACHED = (
+    "You've reached today's chat limit, so I can't sort this one for you. "
+    "Pick what it's about and I'll pass your message to staff as it is.\n\n"
+    "If anyone is in danger, call your local emergency number first."
+)
+
+# Button replies are under Telegram's 200-character limit for pop-up alerts.
+BUTTON_EXPIRED = "This menu has expired. Send your message again, then pick a button."
+BUTTON_BUSY = (
+    "You've sent several requests this hour. Please wait a bit, or tap Emergency "
+    "if anyone is in danger."
+)
+
+
+class LimitChoice(NamedTuple):
+    label: str
+    category: Category
+    priority: Priority
+    reply: str
+
+
+# Buttons shown past the daily limit. The resident picks the category; nothing is classified.
+LIMIT_CHOICES = {
+    "emergency": LimitChoice("🚨 Emergency", Category.OTHER, Priority.EMERGENCY, EMERGENCY),
+    "repair": LimitChoice(
+        "🔧 Repair / work order",
+        Category.MAINTENANCE,
+        Priority.NORMAL,
+        "Sent to staff as a repair request. If you didn't mention your block and unit, "
+        "they'll ask you for it. Nothing has been arranged yet.",
+    ),
+    "question": LimitChoice(
+        "❓ Question",
+        Category.GENERAL,
+        Priority.NORMAL,
+        "Sent to the management office as a question. Staff will reply when they can.",
+    ),
+    "contact": LimitChoice(
+        "📞 Ask office to contact me",
+        Category.OTHER,
+        Priority.NORMAL,
+        "Asked the management office to contact you. Nothing has been arranged yet.",
+    ),
+}
 
 
 def resident_reply(result: Classification, language: str | None = None) -> str:

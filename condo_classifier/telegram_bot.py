@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -55,6 +56,8 @@ from condo_classifier.chat import (
 from condo_classifier.knowledge import FAQ_PATH, KnowledgeBase, looks_like_question
 from condo_classifier.language import TranslationError, TranslatorChain, translator_from_env
 from condo_classifier.replies import (
+    BUTTON_BUSY,
+    BUTTON_EXPIRED,
     CANCELLED,
     CHOOSE_LANGUAGE,
     HANDED_BACK,
@@ -65,6 +68,8 @@ from condo_classifier.replies import (
     HUMAN_FIRST,
     INVALID,
     LANGUAGE_SET,
+    LIMIT_CHOICES,
+    LIMIT_REACHED,
     NEW_REQUEST,
     NOT_FOR_YOU,
     NOT_READY,
@@ -88,9 +93,9 @@ from condo_classifier.replies import (
     resident_reply,
     work_order_summary,
 )
-from condo_classifier.schema import ResidentRequest
+from condo_classifier.schema import Classification, Priority, ResidentRequest
 from condo_classifier.service import Classifier
-from condo_classifier.signals import safety_signal
+from condo_classifier.signals import location_hint, safety_signal
 from condo_classifier.staff import new_request_id, resident_label, review_notes, staff_card
 from condo_classifier.store import (
     ROUTINE,
@@ -99,6 +104,7 @@ from condo_classifier.store import (
     RequestStore,
     default_store_path,
 )
+from condo_classifier.taxonomy import LABELS
 from condo_classifier.vision import (
     ClaudePhotoDescriber,
     OllamaPhotoDescriber,
@@ -129,6 +135,10 @@ SAVED_PHOTO_EDGE = 2048
 # How long a follow-up question ("can my son use it?") still refers to the last FAQ answer.
 FAQ_FOLLOW_UP_SECONDS = 10 * 60
 MAX_VOICE_SECONDS = 120
+DEFAULT_DAILY_LIMIT = 20
+BUTTON_REQUESTS_PER_HOUR = 3  # Non-emergency button requests; Emergency is never capped.
+MAX_HELD_MESSAGES = 5  # Messages kept past the limit until the resident picks a button.
+STAFF_LIMIT_COMMAND = re.compile(r"^/(unlimit|relimit)(?:@\w+)?(?:\s+(-?\d+))?\s*$")
 
 
 # A conversation belongs to a private chat (its ID) or, in a group, to one person in it.
@@ -184,6 +194,8 @@ class ResidentBot:
         knowledge: KnowledgeBase | None = None,
         translator: TranslatorChain | None = None,
         transcriber: TranscriberChain | None = None,
+        daily_limit: int = DEFAULT_DAILY_LIMIT,
+        unlimited_ids: set[int] | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
@@ -207,6 +219,108 @@ class ResidentBot:
         self.recent_faq: dict[Key, tuple[float, Conversation]] = {}
         # Voice language each resident picked with /language. Survives /new, not restarts.
         self.voice_languages: dict[Key, str] = {}
+        # Daily message limit per resident, by Telegram user ID; 0 turns it off. Counts,
+        # lifted limits and held messages live in memory and reset on restart.
+        self.daily_limit = daily_limit
+        self.unlimited_ids = set(unlimited_ids or ())
+        self.message_counts: dict[int, tuple[date, int]] = {}
+        # Past the limit, messages wait here for a button; staff get them only after a tap.
+        self.held_messages: dict[int, list[ResidentMessage]] = {}
+        self.button_requests: dict[int, list[float]] = {}
+
+    def limited(self, user_id: int) -> bool:
+        return bool(self.daily_limit) and user_id not in self.unlimited_ids
+
+    def at_limit(self, user_id: int) -> bool:
+        """Whether today's limit is used up, without counting a message."""
+        day, count = self.message_counts.get(user_id, (date.today(), 0))
+        return self.limited(user_id) and day == date.today() and count >= self.daily_limit
+
+    def over_limit(self, user_id: int, text: str) -> bool:
+        """Count this message and say whether it is past today's limit.
+
+        Possible emergencies are never blocked: the safety screen is rule-based and free.
+        """
+        if not self.limited(user_id):
+            return False
+        today = date.today()
+        day, count = self.message_counts.get(user_id, (today, 0))
+        count = count + 1 if day == today else 1
+        self.message_counts[user_id] = (today, count)
+        return count > self.daily_limit and safety_signal(text) is None
+
+    def hold(self, user_id: int, message: ResidentMessage) -> None:
+        held = self.held_messages.setdefault(user_id, [])
+        held.append(message)
+        del held[:-MAX_HELD_MESSAGES]
+
+    def staff_limit_command(self, text: str) -> str:
+        """Handle /unlimit or /relimit <Telegram ID> sent in the staff chat."""
+        found = STAFF_LIMIT_COMMAND.match(text.strip())
+        if not found or not found.group(2):
+            return (
+                "Use /unlimit <Telegram ID> or /relimit <Telegram ID>. "
+                "The ID is on the request card."
+            )
+        command, user_id = found.group(1), int(found.group(2))
+        if command == "unlimit":
+            self.unlimited_ids.add(user_id)
+            return f"Lifted the daily limit for Telegram ID {user_id} until the bot restarts."
+        self.unlimited_ids.discard(user_id)
+        self.message_counts.pop(user_id, None)
+        return f"Telegram ID {user_id} is back on the daily limit of {self.daily_limit} messages."
+
+    def limit_choice(self, key: Key, user: User, choice: str) -> tuple[str, Conversation | None]:
+        """Turn a button tap past the daily limit into a fixed reply and a submitted request.
+
+        The resident picks the category, so nothing is classified and no model is called.
+        """
+        held = self.held_messages.get(user.id)
+        option = LIMIT_CHOICES.get(choice)
+        if not held or option is None:
+            return BUTTON_EXPIRED, None
+        emergency = option.priority == Priority.EMERGENCY
+        if not emergency:
+            now = time.monotonic()
+            recent = [
+                tapped for tapped in self.button_requests.get(user.id, []) if now - tapped < 3600
+            ]
+            if len(recent) >= BUTTON_REQUESTS_PER_HOUR:
+                # Keep the messages so the resident can still tap Emergency.
+                return BUTTON_BUSY, None
+            self.button_requests[user.id] = [*recent, now]
+        del self.held_messages[user.id]
+        conversation = Conversation(key=key, said=held)
+        conversation.request_id = new_request_id()
+        conversation.status = "emergency" if emergency else "submitted"
+        conversation.escalated = emergency
+        conversation.resident = resident_label(user.full_name, user.username, user.id)
+        conversation.user_id = user.id
+        conversation.resident_name = user.full_name
+        conversation.username = user.username
+        conversation.last_result = Classification(
+            category=option.category,
+            priority=option.priority,
+            suggested_team=LABELS[option.category].team,
+            review_required=True,
+            review_reasons=[
+                "Resident was past the daily message limit and chose this button; "
+                "the message was not classified."
+            ],
+            missing_details=[],
+            location=location_hint(conversation.request_text()),
+            confidence=None,
+            confidence_kind="unavailable",
+            category_scores={},
+            evidence=[],
+            backend="resident_button",
+            model="none",
+            status="safety_escalation" if emergency else "needs_review",
+            elapsed_ms=0,
+        )
+        log.info("Limit button %s for %s", choice, conversation.request_id)
+        self.save(key, conversation)
+        return option.reply, conversation
 
     def conversation(self, key: Key) -> Conversation:
         conversation = self.conversations.get(key)
@@ -593,6 +707,11 @@ class ResidentBot:
             async with self.lock(self.key(update)):
                 await self.forward_to_staff(update, context, existing, caption, photo=True)
             return
+        if self.at_limit(update.effective_user.id):
+            # Past the daily limit: no vision call. The caption still reaches the button menu.
+            async with self.lock(self.key(update)):
+                await self.respond(update, context, caption or "📷 Sent a photo")
+            return
         if self.describer is None:
             await message.reply_text(PHOTO_UNAVAILABLE)
             return
@@ -824,10 +943,16 @@ class ResidentBot:
         chat_id = update.effective_chat.id
         key = self.key(update)
         bot = context.bot
+        user = update.effective_user
+        if self.over_limit(user.id, text):
+            # Past the limit, buttons replace the models so residents can still reach staff.
+            log.info("Daily message limit reached")
+            self.hold(user.id, ResidentMessage(text, text, voice_file_id is not None))
+            await message.reply_text(LIMIT_REACHED, reply_markup=limit_keyboard())
+            return
         conversation = self.conversation(key)
         if photo is not None:
             conversation.pending_photos.append(photo)
-        user = update.effective_user
         conversation.resident = resident_label(user.full_name, user.username, user.id)
         conversation.user_id = user.id
         conversation.resident_name = user.full_name
@@ -883,6 +1008,29 @@ class ResidentBot:
                 return
             await query.answer()
             await self.apply(bot, chat_id, key, conversation, action, query.message.reply_text)
+
+    async def limit_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        key = key_of(query.message.chat, query.from_user)
+        async with self.lock(key):
+            reply, conversation = self.limit_choice(
+                key, query.from_user, query.data.removeprefix("limit:")
+            )
+            if conversation is None:
+                await query.answer(reply, show_alert=True)
+                if reply == BUTTON_EXPIRED:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                return
+            await query.answer()
+            # Remove the buttons so one menu sends one request.
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(reply)
+            await self.notify_staff(context.bot, conversation, fresh=True)
+
+    async def staff_limit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.effective_message.reply_text(
+            self.staff_limit_command(update.effective_message.text)
+        )
 
     async def apply(
         self, bot: Bot, chat_id: int, key: Key, conversation: Conversation, action, send
@@ -990,7 +1138,15 @@ class ResidentBot:
             app.add_handler(MessageHandler(private & filters.VOICE, self.voice))
         app.add_handler(MessageHandler(private & ~filters.COMMAND, self.other))
         app.add_handler(CallbackQueryHandler(self.button, pattern=r"^(submit|cancel|human):"))
+        app.add_handler(CallbackQueryHandler(self.limit_button, pattern=r"^limit:"))
         if self.staff_chat_id is not None:
+            # Only the staff chat can lift limits. Regex also covers channel posts.
+            limit_command = (
+                filters.Chat(self.staff_chat_id)
+                & filters.Regex(r"^/(unlimit|relimit)(@\w+)?(\s|$)")
+                & ~filters.UpdateType.EDITED
+            )
+            app.add_handler(MessageHandler(limit_command, self.staff_limit))
             # Staff reply to a request card to message the resident; /done hands back to the AI.
             staff = filters.Chat(self.staff_chat_id) & filters.UpdateType.MESSAGE & filters.REPLY
             app.add_handler(CommandHandler("done", self.staff_done, filters=staff))
@@ -999,6 +1155,14 @@ class ResidentBot:
         chat_id_command = filters.Regex(r"^/chatid(@\w+)?$") & ~filters.UpdateType.EDITED
         app.add_handler(MessageHandler(chat_id_command, self.chat_id))
         return app
+
+
+def limit_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(option.label, callback_data=f"limit:{key}")
+        for key, option in LIMIT_CHOICES.items()
+    ]
+    return InlineKeyboardMarkup([buttons[:2], buttons[2:]])
 
 
 CHAT_PROVIDERS = {"claude": ResidentChat, "ollama": OllamaChat}
@@ -1089,6 +1253,13 @@ def build_bot() -> ResidentBot:
     limit = os.getenv("BOT_TO_BOT_LIMIT", "3")
     if not limit.isdigit():
         raise SystemExit("BOT_TO_BOT_LIMIT must be a whole number (0 ignores other bots).")
+    daily_limit = os.getenv("DAILY_MESSAGE_LIMIT", str(DEFAULT_DAILY_LIMIT)).strip()
+    if not daily_limit.isdigit():
+        raise SystemExit("DAILY_MESSAGE_LIMIT must be a whole number (0 turns the limit off).")
+    unlimited = [part.strip() for part in os.getenv("BOT_UNLIMITED_IDS", "").split(",")]
+    unlimited = [part for part in unlimited if part]
+    if not all(part.lstrip("-").isdigit() for part in unlimited):
+        raise SystemExit("BOT_UNLIMITED_IDS must be Telegram IDs separated by commas.")
     if transcriber and not translator:
         log.warning(
             "TRANSCRIBE_WITH is set but TRANSLATE_WITH is not, so voice messages in other "
@@ -1114,6 +1285,8 @@ def build_bot() -> ResidentBot:
         knowledge,
         translator,
         transcriber,
+        daily_limit=int(daily_limit),
+        unlimited_ids={int(part) for part in unlimited},
     )
 
 
