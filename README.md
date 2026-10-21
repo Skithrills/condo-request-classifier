@@ -310,6 +310,13 @@ that requests are not reaching staff.
 | `BOT_REPLIES` | `chat` | `chat` for Claude replies, `fixed` for template replies without Claude |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
 | `CHAT_MODEL` / `CHAT_EFFORT` | `claude-haiku-5-5` / `low` | Model and effort for chat replies |
+| `DAILY_MESSAGE_LIMIT` | `20` | Messages per resident per day; `0` turns the limit off |
+| `BOT_UNLIMITED_IDS` | not set | Comma-separated Telegram IDs that are never limited |
+
+Past the daily limit the bot sends a fixed reply and does not call Claude, but
+possible emergencies are still escalated. In the staff chat, send
+`/unlimit <Telegram ID>` to lift a resident's limit, or `/relimit <Telegram ID>`
+to restore it; the ID is on each request card. Limits reset when the bot restarts.
 
 Message text is never logged. Chat reply wording rules live in
 `condo_classifier/chat.py`; fixed replies live in `condo_classifier/replies.py`.

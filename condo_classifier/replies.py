@@ -19,6 +19,12 @@ TEXT_ONLY = "Please describe your request in a text message. I can't read photos
 
 INVALID = "Please describe your request in words, between 3 and 4,000 characters."
 
+LIMIT_REACHED = (
+    "You've reached today's message limit, so I can't sort more requests until tomorrow. "
+    "Please contact the management office directly if it can't wait.\n\n"
+    "If anyone is in danger, call your local emergency number first."
+)
+
 UNAVAILABLE = (
     "Sorry, I couldn't sort your request right now. Please try again shortly or "
     "contact the management office directly."

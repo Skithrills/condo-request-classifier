@@ -8,7 +8,9 @@ logged; only the outcome is. Conversations live in memory and reset on restart.
 import asyncio
 import logging
 import os
+import re
 import time
+from datetime import date
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -20,6 +22,7 @@ from condo_classifier.backends import ROOT, backend_from_name
 from condo_classifier.chat import IDLE_RESET_SECONDS, Conversation, ResidentChat
 from condo_classifier.replies import (
     INVALID,
+    LIMIT_REACHED,
     NEW_REQUEST,
     TEXT_ONLY,
     UNAVAILABLE,
@@ -28,9 +31,13 @@ from condo_classifier.replies import (
 )
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
+from condo_classifier.signals import safety_signal
 from condo_classifier.staff import new_request_id, resident_label, staff_card
 
 log = logging.getLogger(__name__)
+
+DEFAULT_DAILY_LIMIT = 20
+STAFF_LIMIT_COMMAND = re.compile(r"^/(unlimit|relimit)(?:@\w+)?(?:\s+(-?\d+))?\s*$")
 
 
 class ResidentBot:
@@ -39,12 +46,48 @@ class ResidentBot:
         classifier: Classifier,
         chat: ResidentChat | None = None,
         staff_chat_id: int | None = None,
+        daily_limit: int = DEFAULT_DAILY_LIMIT,
+        unlimited_ids: set[int] | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
         self.staff_chat_id = staff_chat_id
         self.conversations: dict[int, Conversation] = {}
         self.locks: dict[int, asyncio.Lock] = {}
+        # Residents talk in private chats, where the chat ID is the user's Telegram ID.
+        # 0 disables the limit. Counts and lifted limits live in memory like conversations.
+        self.daily_limit = daily_limit
+        self.unlimited_ids = set(unlimited_ids or ())
+        self.message_counts: dict[int, tuple[date, int]] = {}
+
+    def over_limit(self, chat_id: int, text: str) -> bool:
+        """Count this message and say whether it is past today's limit.
+
+        Possible emergencies are never blocked: the safety screen is rule-based and free.
+        """
+        if not self.daily_limit or chat_id in self.unlimited_ids:
+            return False
+        today = date.today()
+        day, count = self.message_counts.get(chat_id, (today, 0))
+        count = count + 1 if day == today else 1
+        self.message_counts[chat_id] = (today, count)
+        return count > self.daily_limit and safety_signal(text) is None
+
+    def staff_limit_command(self, text: str) -> str:
+        """Handle /unlimit or /relimit <Telegram ID> sent in the staff chat."""
+        found = STAFF_LIMIT_COMMAND.match(text.strip())
+        if not found or not found.group(2):
+            return (
+                "Use /unlimit <Telegram ID> or /relimit <Telegram ID>. "
+                "The ID is on the request card."
+            )
+        command, user_id = found.group(1), int(found.group(2))
+        if command == "unlimit":
+            self.unlimited_ids.add(user_id)
+            return f"Lifted the daily limit for Telegram ID {user_id} until the bot restarts."
+        self.unlimited_ids.discard(user_id)
+        self.message_counts.pop(user_id, None)
+        return f"Telegram ID {user_id} is back on the daily limit of {self.daily_limit} messages."
 
     def conversation(self, chat_id: int) -> Conversation:
         conversation = self.conversations.get(chat_id)
@@ -59,6 +102,9 @@ class ResidentBot:
             ResidentRequest(text=text, channel="Telegram")
         except ValidationError:
             return INVALID
+        if self.over_limit(chat_id, text):
+            log.info("Daily message limit reached")
+            return LIMIT_REACHED
         conversation = self.conversation(chat_id)
         conversation.resident_texts.append(text)
         # Classify the whole conversation so details sent later fill in what was missing.
@@ -160,6 +206,11 @@ class ResidentBot:
             "Put it in .env as STAFF_CHAT_ID to send resident requests here."
         )
 
+    async def staff_limit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.effective_message.reply_text(
+            self.staff_limit_command(update.effective_message.text)
+        )
+
     def application(self, token: str) -> Application:
         app = Application.builder().token(token).build()
         # Residents only talk to the bot in private chats; groups are for staff.
@@ -171,6 +222,14 @@ class ResidentBot:
         # CommandHandler ignores channel posts, so match /chatid as text to cover channels.
         chat_id_command = filters.Regex(r"^/chatid(@\w+)?$") & ~filters.UpdateType.EDITED
         app.add_handler(MessageHandler(chat_id_command, self.chat_id))
+        if self.staff_chat_id is not None:
+            # Only the staff chat can lift limits. Regex also covers channel posts.
+            staff_command = (
+                filters.Chat(self.staff_chat_id)
+                & filters.Regex(r"^/(unlimit|relimit)(@\w+)?(\s|$)")
+                & ~filters.UpdateType.EDITED
+            )
+            app.add_handler(MessageHandler(staff_command, self.staff_limit))
         return app
 
 
@@ -201,8 +260,21 @@ def build_bot() -> ResidentBot:
             "STAFF_CHAT_ID is not set, so requests are not sent to staff. "
             "Add the bot to the staff group and send /chatid there to get the ID."
         )
+    daily_limit = os.getenv("DAILY_MESSAGE_LIMIT", str(DEFAULT_DAILY_LIMIT)).strip()
+    if not daily_limit.isdigit():
+        raise SystemExit("DAILY_MESSAGE_LIMIT must be a whole number (0 turns the limit off).")
+    unlimited = [part.strip() for part in os.getenv("BOT_UNLIMITED_IDS", "").split(",")]
+    unlimited = [part for part in unlimited if part]
+    if not all(part.lstrip("-").isdigit() for part in unlimited):
+        raise SystemExit("BOT_UNLIMITED_IDS must be Telegram IDs separated by commas.")
     log.info("Classifier backend: %s. Replies: %s.", backend_name, replies)
-    return ResidentBot(Classifier(backend), chat, int(staff_chat_id) if staff_chat_id else None)
+    return ResidentBot(
+        Classifier(backend),
+        chat,
+        int(staff_chat_id) if staff_chat_id else None,
+        daily_limit=int(daily_limit),
+        unlimited_ids={int(part) for part in unlimited},
+    )
 
 
 def main() -> None:

@@ -1,6 +1,8 @@
+from datetime import date
+
 import pytest
 
-from condo_classifier.replies import INVALID, UNAVAILABLE, resident_reply
+from condo_classifier.replies import INVALID, LIMIT_REACHED, UNAVAILABLE, resident_reply
 from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.service import Classifier
 
@@ -62,11 +64,11 @@ def test_provider_error_reply():
     assert resident_reply(make_result(status="provider_error")) == UNAVAILABLE
 
 
-def bot_with(classifier, chat=None):
+def bot_with(classifier, chat=None, **options):
     pytest.importorskip("telegram")
     from condo_classifier.telegram_bot import ResidentBot
 
-    return ResidentBot(classifier, chat)
+    return ResidentBot(classifier, chat, **options)
 
 
 def test_fixed_replies_end_to_end(baseline):
@@ -129,6 +131,48 @@ def test_idle_conversation_resets(baseline, monkeypatch):
     assert bot.conversations[1].resident_texts == ["Loud music next door"]
 
 
+def test_daily_limit_blocks_extra_messages_but_not_emergencies(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=2)
+    bot.reply_for(1, "The light keeps flickering")
+    bot.reply_for(1, "It's outside #05-12")
+    assert bot.reply_for(1, "Also the lift is slow") == LIMIT_REACHED
+    assert bot.conversations[1].resident_texts == [
+        "The light keeps flickering",
+        "It's outside #05-12",
+    ]
+    assert "emergency number" in bot.reply_for(1, "Smoke is coming from the bin chute!")
+    assert bot.reply_for(2, "Loud music next door") != LIMIT_REACHED
+
+
+def test_daily_limit_resets_on_a_new_day(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1)
+    bot.reply_for(1, "The light keeps flickering")
+    assert bot.reply_for(1, "Still flickering") == LIMIT_REACHED
+    bot.message_counts[1] = (date(2000, 1, 1), 99)
+    assert bot.reply_for(1, "Still flickering") != LIMIT_REACHED
+
+
+def test_unlimited_ids_and_zero_limit_skip_the_limit(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1, unlimited_ids={7})
+    for _ in range(3):
+        assert bot.reply_for(7, "The light keeps flickering") != LIMIT_REACHED
+    bot = bot_with(Classifier(baseline), daily_limit=0)
+    for _ in range(3):
+        assert bot.reply_for(1, "The light keeps flickering") != LIMIT_REACHED
+
+
+def test_staff_can_lift_and_restore_a_limit(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1)
+    bot.reply_for(5, "The light keeps flickering")
+    assert bot.reply_for(5, "Still flickering") == LIMIT_REACHED
+    assert "Lifted" in bot.staff_limit_command("/unlimit 5")
+    assert bot.reply_for(5, "Still flickering") != LIMIT_REACHED
+    assert "back on the daily limit" in bot.staff_limit_command("/relimit@condo_bot 5")
+    bot.reply_for(5, "Still flickering")
+    assert bot.reply_for(5, "Still flickering") == LIMIT_REACHED
+    assert bot.staff_limit_command("/unlimit").startswith("Use /unlimit")
+
+
 @pytest.mark.parametrize(
     "env,message",
     [
@@ -136,6 +180,8 @@ def test_idle_conversation_resets(baseline, monkeypatch):
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "claude"}, "ANTHROPIC_API_KEY"),
         ({"BOT_REPLIES": "loud"}, "chat or fixed"),
         ({"BOT_REPLIES": "fixed", "CLASSIFIER_BACKEND": "gpt"}, "Check .env"),
+        ({"BOT_REPLIES": "fixed", "DAILY_MESSAGE_LIMIT": "lots"}, "DAILY_MESSAGE_LIMIT"),
+        ({"BOT_REPLIES": "fixed", "BOT_UNLIMITED_IDS": "me"}, "BOT_UNLIMITED_IDS"),
     ],
 )
 def test_build_bot_explains_missing_setup(monkeypatch, env, message):

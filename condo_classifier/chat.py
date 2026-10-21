@@ -101,6 +101,9 @@ class ResidentChat:
                 model=self.model,
                 max_tokens=1024,
                 output_config={"effort": self.effort},
+                # Automatic caching follows the growing conversation, so each turn rereads
+                # the earlier history from cache instead of paying full price for it again.
+                cache_control={"type": "ephemeral"},
                 system=SYSTEM,
                 messages=conversation.messages + turn,
             )

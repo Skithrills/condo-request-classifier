@@ -54,13 +54,32 @@ def test_ungrounded_evidence_is_retried_once(backend):
     ]
     assert backend.predict(REQUEST).evidence == ["light is broken"]
     assert backend.client.messages.parse.call_count == 2
-    assert "exact spans" in backend.client.messages.parse.call_args.kwargs["system"]
+    assert "exact spans" in backend.client.messages.parse.call_args.kwargs["system"][-1]["text"]
 
 
 def test_invalid_output_twice_needs_review(backend):
-    backend.client.messages.parse.return_value = reply(location="Block X")
+    backend.client.messages.parse.return_value = reply(evidence=["A gas pipe has burst"])
     with pytest.raises(ProviderError, match="twice"):
         backend.predict(REQUEST)
+
+
+def test_paraphrased_location_is_dropped_not_retried(backend):
+    backend.client.messages.parse.return_value = reply(location="lobby area")
+    prediction = backend.predict(REQUEST)
+    assert prediction.category == Category.MAINTENANCE
+    assert prediction.location is None
+    assert backend.client.messages.parse.call_count == 1
+
+
+def test_instructions_are_cached_and_retry_keeps_the_prefix(backend):
+    backend.client.messages.parse.side_effect = [
+        reply(evidence=["A gas pipe has burst"]),
+        reply(),
+    ]
+    backend.predict(REQUEST)
+    first, second = (call.kwargs["system"] for call in backend.client.messages.parse.call_args_list)
+    assert first[0]["cache_control"] == {"type": "ephemeral"}
+    assert second[0] == first[0]
 
 
 def test_refusal_is_a_provider_error(backend):

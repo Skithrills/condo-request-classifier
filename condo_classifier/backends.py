@@ -102,7 +102,7 @@ def parse_model_decision(content: str, request: ResidentRequest) -> ModelDecisio
 
 
 def ground_decision(result: ModelDecision, request: ResidentRequest) -> ModelDecision:
-    """Require evidence and location to be verbatim spans of the resident's message."""
+    """Require verbatim evidence spans; drop a location that is not a verbatim span."""
     normalized_evidence = []
     for quote in result.evidence:
         # Small models sometimes add quotation marks inside the JSON string.
@@ -115,7 +115,9 @@ def ground_decision(result: ModelDecision, request: ResidentRequest) -> ModelDec
         normalized_evidence.append(quote)
     result.evidence = normalized_evidence
     if result.location and result.location.casefold() not in request.text.casefold():
-        raise ValueError("Extracted location must be an exact span from the request.")
+        # Models often paraphrase locations slightly. Dropping it keeps the classification;
+        # the review step then uses the rule-based hint or asks the resident for it.
+        result.location = None
     return result
 
 
@@ -224,7 +226,8 @@ class ClaudeBackend:
         )
 
     def predict(self, request: ResidentRequest) -> Prediction:
-        system = INSTRUCTIONS
+        # The instructions are identical for every resident, so cache them; the message varies.
+        system = [{"type": "text", "text": INSTRUCTIONS, "cache_control": {"type": "ephemeral"}}]
         content = json.dumps({"channel": request.channel, "resident_message": request.text})
         for attempt in range(2):
             try:
@@ -259,10 +262,14 @@ class ClaudeBackend:
                 )
             except (ValidationError, ValueError):
                 if attempt == 0:
-                    system = INSTRUCTIONS + (
-                        "\nThe previous response was invalid. Evidence and location must be "
-                        "exact spans copied from the resident message."
-                    )
+                    # A separate block keeps the cached instructions prefix intact.
+                    system = system + [
+                        {
+                            "type": "text",
+                            "text": "The previous response was invalid. Evidence must be "
+                            "exact spans copied from the resident message.",
+                        }
+                    ]
         raise ProviderError("Claude returned invalid output twice. Staff review is required.")
 
 
