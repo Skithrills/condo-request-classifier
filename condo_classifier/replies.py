@@ -1,6 +1,8 @@
 """Resident-facing reply text. Kept free of Telegram imports so any chat channel can reuse it."""
 
-from condo_classifier.schema import Classification, Priority
+from typing import NamedTuple
+
+from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.taxonomy import LABELS
 
 WELCOME = (
@@ -19,11 +21,57 @@ TEXT_ONLY = "Please describe your request in a text message. I can't read photos
 
 INVALID = "Please describe your request in words, between 3 and 4,000 characters."
 
+EMERGENCY = (
+    "This sounds urgent. If anyone is in danger, call your local emergency number "
+    "now and move to a safe place.\n\n"
+    "Your message has been marked as an emergency for building staff, but this chat "
+    "is not an emergency service."
+)
+
 LIMIT_REACHED = (
-    "You've reached today's message limit, so I can't sort more requests until tomorrow. "
-    "Please contact the management office directly if it can't wait.\n\n"
+    "You've reached today's chat limit, so I can't sort this one for you. "
+    "Pick what it's about and I'll pass your message to staff as it is.\n\n"
     "If anyone is in danger, call your local emergency number first."
 )
+
+# Button replies are under Telegram's 200-character limit for pop-up alerts.
+BUTTON_EXPIRED = "This menu has expired. Send your message again, then pick a button."
+BUTTON_BUSY = (
+    "You've sent several requests this hour. Please wait a bit, or tap Emergency "
+    "if anyone is in danger."
+)
+
+
+class LimitChoice(NamedTuple):
+    label: str
+    category: Category
+    priority: Priority
+    reply: str
+
+
+# Buttons shown past the daily limit. The resident picks the category; nothing is classified.
+LIMIT_CHOICES = {
+    "emergency": LimitChoice("🚨 Emergency", Category.OTHER, Priority.EMERGENCY, EMERGENCY),
+    "repair": LimitChoice(
+        "🔧 Repair / work order",
+        Category.MAINTENANCE,
+        Priority.NORMAL,
+        "Sent to staff as a repair request. If you didn't mention your block and unit, "
+        "they'll ask you for it. Nothing has been arranged yet.",
+    ),
+    "question": LimitChoice(
+        "❓ Question",
+        Category.GENERAL,
+        Priority.NORMAL,
+        "Sent to the management office as a question. Staff will reply when they can.",
+    ),
+    "contact": LimitChoice(
+        "📞 Ask office to contact me",
+        Category.OTHER,
+        Priority.NORMAL,
+        "Asked the management office to contact you. Nothing has been arranged yet.",
+    ),
+}
 
 UNAVAILABLE = (
     "Sorry, I couldn't sort your request right now. Please try again shortly or "
@@ -34,12 +82,7 @@ UNAVAILABLE = (
 def resident_reply(result: Classification) -> str:
     """Summarise a classification for the resident without internal scores or review notes."""
     if result.status == "safety_escalation":
-        return (
-            "This sounds urgent. If anyone is in danger, call your local emergency number "
-            "now and move to a safe place.\n\n"
-            "Your message has been marked as an emergency for building staff, but this chat "
-            "is not an emergency service."
-        )
+        return EMERGENCY
     if result.status == "provider_error":
         return UNAVAILABLE
     label = LABELS[result.category]

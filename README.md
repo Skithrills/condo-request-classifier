@@ -313,8 +313,11 @@ that requests are not reaching staff.
 | `DAILY_MESSAGE_LIMIT` | `20` | Messages per resident per day; `0` turns the limit off |
 | `BOT_UNLIMITED_IDS` | not set | Comma-separated Telegram IDs that are never limited |
 
-Past the daily limit the bot sends a fixed reply and does not call Claude, but
-possible emergencies are still escalated. In the staff chat, send
+Past the daily limit the bot stops calling Claude and replies with buttons instead:
+**Emergency**, **Repair / work order**, **Question** and **Ask office to contact me**.
+The tapped button sets the category, and the resident's held messages go to the staff
+chat unclassified. Emergency always works; the other buttons allow 3 requests an hour.
+Messages that trip the rule-based emergency screen are still escalated as usual. In the staff chat, send
 `/unlimit <Telegram ID>` to lift a resident's limit, or `/relimit <Telegram ID>`
 to restore it; the ID is on each request card. Limits reset when the bot restarts.
 

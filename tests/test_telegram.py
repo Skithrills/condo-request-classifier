@@ -1,8 +1,20 @@
+import asyncio
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from condo_classifier.replies import INVALID, LIMIT_REACHED, UNAVAILABLE, resident_reply
+from condo_classifier.replies import (
+    BUTTON_BUSY,
+    BUTTON_EXPIRED,
+    EMERGENCY,
+    INVALID,
+    LIMIT_CHOICES,
+    LIMIT_REACHED,
+    UNAVAILABLE,
+    resident_reply,
+)
 from condo_classifier.schema import Category, Classification, Priority
 from condo_classifier.service import Classifier
 
@@ -171,6 +183,94 @@ def test_staff_can_lift_and_restore_a_limit(baseline):
     bot.reply_for(5, "Still flickering")
     assert bot.reply_for(5, "Still flickering") == LIMIT_REACHED
     assert bot.staff_limit_command("/unlimit").startswith("Use /unlimit")
+
+
+def test_limit_buttons_send_held_messages_with_the_chosen_category(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1)
+    bot.reply_for(1, "Hi there")
+    assert bot.reply_for(1, "The gym treadmill is broken") == LIMIT_REACHED
+    assert bot.reply_for(1, "It's in the gym") == LIMIT_REACHED
+    reply, result, texts = bot.limit_choice(1, "repair")
+    assert reply == LIMIT_CHOICES["repair"].reply
+    assert texts == ["The gym treadmill is broken", "It's in the gym"]
+    assert result.category == Category.MAINTENANCE
+    assert result.status == "needs_review"
+    assert result.location == "gym"
+    assert result.backend == "resident_button"
+    # One menu sends one request; older menus have expired.
+    assert bot.limit_choice(1, "repair") == (BUTTON_EXPIRED, None, [])
+
+
+def test_emergency_button_is_never_capped(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1)
+    bot.reply_for(1, "Hi there")
+    for _ in range(3):
+        bot.reply_for(1, "Please call me back")
+        assert bot.limit_choice(1, "contact")[1] is not None
+    bot.reply_for(1, "Please call me back")
+    assert bot.limit_choice(1, "question") == (BUTTON_BUSY, None, [])
+    reply, result, texts = bot.limit_choice(1, "emergency")
+    assert reply == EMERGENCY
+    assert result.priority == Priority.EMERGENCY
+    assert result.status == "safety_escalation"
+    assert texts == ["Please call me back"]
+
+
+def test_unknown_or_stale_button_expires(baseline):
+    bot = bot_with(Classifier(baseline), daily_limit=1)
+    assert bot.limit_choice(1, "repair") == (BUTTON_EXPIRED, None, [])
+    bot.reply_for(1, "Hi there")
+    bot.reply_for(1, "Another message")
+    assert bot.limit_choice(1, "approve_everything") == (BUTTON_EXPIRED, None, [])
+
+
+def test_limit_keyboard_has_every_choice():
+    pytest.importorskip("telegram")
+    from condo_classifier.telegram_bot import limit_keyboard
+
+    rows = limit_keyboard().inline_keyboard
+    assert [button.callback_data for row in rows for button in row] == [
+        f"limit:{key}" for key in LIMIT_CHOICES
+    ]
+
+
+def test_limit_menu_and_button_tap_reach_staff(baseline):
+    pytest.importorskip("telegram")
+    bot = bot_with(Classifier(baseline), daily_limit=1, staff_chat_id=-100)
+    user = SimpleNamespace(full_name="Ada", username=None, id=1)
+    telegram = SimpleNamespace(send_chat_action=AsyncMock(), send_message=AsyncMock())
+    context = SimpleNamespace(bot=telegram)
+
+    def text_update(text):
+        message = SimpleNamespace(text=text, reply_text=AsyncMock())
+        return SimpleNamespace(
+            effective_message=message, effective_chat=SimpleNamespace(id=1), effective_user=user
+        )
+
+    asyncio.run(bot.text(text_update("Hi there"), context))
+    telegram.send_message.reset_mock()
+    blocked = text_update("Lift in Block A is stuck again")
+    asyncio.run(bot.text(blocked, context))
+    blocked.effective_message.reply_text.assert_awaited_once()
+    assert blocked.effective_message.reply_text.call_args.args[0] == LIMIT_REACHED
+    assert blocked.effective_message.reply_text.call_args.kwargs["reply_markup"] is not None
+    telegram.send_message.assert_not_awaited()
+
+    query = SimpleNamespace(
+        data="limit:repair",
+        answer=AsyncMock(),
+        edit_message_reply_markup=AsyncMock(),
+        message=SimpleNamespace(reply_text=AsyncMock()),
+    )
+    tap = SimpleNamespace(
+        callback_query=query, effective_chat=SimpleNamespace(id=1), effective_user=user
+    )
+    asyncio.run(bot.limit_button(tap, context))
+    query.edit_message_reply_markup.assert_awaited_once_with(None)
+    query.message.reply_text.assert_awaited_once_with(LIMIT_CHOICES["repair"].reply)
+    chat_id, card = telegram.send_message.call_args.args
+    assert chat_id == -100
+    assert "Maintenance" in card and "Lift in Block A is stuck again" in card
 
 
 @pytest.mark.parametrize(
