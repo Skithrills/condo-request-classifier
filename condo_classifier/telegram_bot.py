@@ -18,6 +18,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 from pydantic import ValidationError
 from telegram import (
@@ -96,7 +97,13 @@ from condo_classifier.replies import (
 from condo_classifier.schema import Classification, Priority, ResidentRequest
 from condo_classifier.service import Classifier
 from condo_classifier.signals import location_hint, safety_signal
-from condo_classifier.staff import new_request_id, resident_label, review_notes, staff_card
+from condo_classifier.staff import (
+    new_request_id,
+    resident_label,
+    review_notes,
+    staff_card,
+    work_order_title,
+)
 from condo_classifier.store import (
     ROUTINE,
     STAFF_SET,
@@ -105,6 +112,7 @@ from condo_classifier.store import (
     default_store_path,
 )
 from condo_classifier.taxonomy import LABELS
+from condo_classifier.trello import WorkOrders
 from condo_classifier.vision import (
     ClaudePhotoDescriber,
     OllamaPhotoDescriber,
@@ -196,6 +204,7 @@ class ResidentBot:
         transcriber: TranscriberChain | None = None,
         daily_limit: int = DEFAULT_DAILY_LIMIT,
         unlimited_ids: set[int] | None = None,
+        work_orders: WorkOrders | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
@@ -205,6 +214,7 @@ class ResidentBot:
         self.knowledge = knowledge
         self.translator = translator
         self.transcriber = transcriber
+        self.work_orders = work_orders
         self.conversations: dict[Key, Conversation] = {}
         self.locks: dict[Key, asyncio.Lock] = {}
         # Loop guard for groups shared with other bots: recent replies to bots, per chat.
@@ -552,8 +562,9 @@ class ResidentBot:
             log.warning("Could not send a voice note to staff: %s", type(exc).__name__)
 
     async def post_card(self, bot: Bot, conversation: Conversation, fresh=False) -> None:
+        """Post or update the staff card, then the Trello work order with the same text."""
         result = conversation.last_result
-        if self.staff_chat_id is None or not self.worth_tracking(conversation):
+        if not self.worth_tracking(conversation):
             return
         if conversation.status == "answered":
             return  # answered from the FAQ; nothing for staff to do
@@ -566,6 +577,22 @@ class ResidentBot:
             language=conversation.language,
             translation_failed=conversation.translation_failed,
         )
+        if self.staff_chat_id is not None:
+            await self.post_staff_message(bot, conversation, card, fresh)
+        if self.work_orders is not None:
+            try:
+                await self.work_orders.save(
+                    conversation,
+                    work_order_title(conversation.request_id, result),
+                    card,
+                    conversation.status == "emergency",
+                )
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                log.warning("Could not save the Trello work order: %s", type(exc).__name__)
+
+    async def post_staff_message(
+        self, bot: Bot, conversation: Conversation, card: str, fresh: bool
+    ) -> None:
         # A first emergency gets a fresh message so it notifies; otherwise edit the card.
         if conversation.status == "emergency" and not conversation.staff_alerted:
             fresh = True
@@ -1222,6 +1249,7 @@ def build_bot() -> ResidentBot:
         describer = PHOTO_PROVIDERS[photos].from_env() if photos != "off" else None
         translator = translator_from_env()
         transcriber = transcriber_from_env()
+        work_orders = WorkOrders.from_env()
     except ValueError as exc:
         raise SystemExit(f"Check .env: {exc}") from exc
     staff_chat_id = os.getenv("STAFF_CHAT_ID", "").strip()
@@ -1229,7 +1257,7 @@ def build_bot() -> ResidentBot:
         raise SystemExit(
             "STAFF_CHAT_ID must be a number. Send /chatid in the staff chat to get it."
         )
-    if not staff_chat_id:
+    if not staff_chat_id and not work_orders:
         log.warning(
             "STAFF_CHAT_ID is not set, so requests are not sent to staff. "
             "Add the bot to the staff group and send /chatid there to get the ID."
@@ -1266,13 +1294,14 @@ def build_bot() -> ResidentBot:
             "languages reach the English classifier untranslated."
         )
     log.info(
-        "Classifier: %s. Replies: %s. Photos: %s. FAQ: %s. Translation: %s. Voice: %s.",
+        "Classifier: %s. Replies: %s. Photos: %s. FAQ: %s. Translation: %s. Voice: %s. Trello: %s.",
         " -> ".join(dict.fromkeys([backend_name, *classifier_fallbacks])),
         " -> ".join(dict.fromkeys([replies, *chat_fallbacks])),
         photos,
         f"{len(knowledge.facts)} entries" if knowledge else "off",
         os.getenv("TRANSLATE_WITH") or "off",
         os.getenv("TRANSCRIBE_WITH") or "off",
+        "on" if work_orders else "off",
     )
     log.info("Saving requests to %s", store.path)
     return ResidentBot(
@@ -1287,6 +1316,7 @@ def build_bot() -> ResidentBot:
         transcriber,
         daily_limit=int(daily_limit),
         unlimited_ids={int(part) for part in unlimited},
+        work_orders=work_orders,
     )
 
 

@@ -440,6 +440,37 @@ This runs a few scripted resident chats (including an FAQ question) through the 
 bot logic with the classifier and chat model from `.env`, prints each reply with its
 status and word count, and estimates the cost when Claude is used.
 
+**File work orders on a Trello board**
+
+Each request can also become a work order card on a Trello board. New requests go
+to the top of **To Do**; a request classified as an emergency goes to **Urgent**
+(and an existing card moves there once it escalates). The card name shows the
+request ID, category and location, and the description is the same text as the
+staff card, so it includes the resident's name and Telegram ID: keep the board
+private. The card is updated as the resident adds details. Staff move cards
+between lists themselves; the bot never moves a card back. If Trello is down, the
+resident is still answered and the bot logs a warning.
+
+You need to be a member of the board, and an admin of a Trello Workspace to create
+the app. It is free.
+
+1. Open [trello.com/power-ups/admin](https://trello.com/power-ups/admin). The first
+   time, tick the Trello Developer Terms box and press **Continue**.
+2. Press **New**, choose **My app doesn't use Power-up capabilities**, and fill in
+   a name (for example Condo Request Bot), your Workspace, email, support contact
+   and author. Press **Create**.
+3. Open **Trello Auth** in the app's menu and press **Generate a new Trello Auth
+   API key**. Copy the **API key** into `.env` as `TRELLO_API_KEY`. (The Secret
+   below it is not needed.)
+4. In the text beside the key, click the **Token** link. On the page that opens,
+   press **Allow**, then copy the token into `.env` as `TRELLO_TOKEN`. Keep it
+   private; revoke it under Trello **Settings → Applications** if it leaks.
+5. Set `TRELLO_BOARD_ID` to the code in the board's address: for
+   `trello.com/b/yZeVpykB/property-agent-and-llm` it is `yZeVpykB`.
+6. Restart the bot. It checks the board has **To Do** and **Urgent** lists on
+   start-up; use `TRELLO_TODO_LIST` and `TRELLO_URGENT_LIST` if yours are named
+   differently.
+
 **Chinese, Malay, Tamil and voice messages**
 
 The safety rules and offline classifier are written for English, so with
@@ -480,6 +511,8 @@ real resident use.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
+| `TRELLO_BOARD_ID` | not set | Trello board for work orders; needs `TRELLO_API_KEY` and `TRELLO_TOKEN` |
+| `TRELLO_TODO_LIST` / `TRELLO_URGENT_LIST` | `To Do` / `Urgent` | Lists for new requests and emergencies |
 | `BOT_REPLIES` | `claude` | `claude` (or `chat`) or `ollama` for model replies, `fixed` for templates |
 | `CHAT_FALLBACK` | `none` | Chat models to try when the main one fails, e.g. `ollama` |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |
