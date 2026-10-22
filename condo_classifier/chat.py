@@ -61,6 +61,9 @@ class Conversation:
     request_id: str | None = None
     staff_message_id: int | None = None
     staff_alerted: bool = False
+    # Trello work order for this request, and whether it was moved to Urgent.
+    work_order_id: str | None = None
+    work_order_urgent: bool = False
 
     @property
     def resident_texts(self) -> list[str]:

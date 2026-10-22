@@ -68,6 +68,13 @@ def staff_card(
     return f"{head}\n{quoted}"
 
 
+def work_order_title(request_id: str, result: Classification) -> str:
+    """Short card name so staff can scan the board: ID, category and where."""
+    prefix = "🚨 " if result.status == "safety_escalation" else ""
+    location = result.location or "location not given"
+    return f"{prefix}{request_id} · {LABELS[result.category].name} · {location}"
+
+
 def quote(message: "ResidentMessage") -> str:
     line = f"> {'🎙️ ' if message.voice else ''}{message.text}"
     if message.english != message.text:

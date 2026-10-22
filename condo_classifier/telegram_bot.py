@@ -10,6 +10,7 @@ import logging
 import os
 import time
 
+import httpx
 from dotenv import load_dotenv
 from pydantic import ValidationError
 from telegram import (
@@ -55,7 +56,13 @@ from condo_classifier.replies import (
 )
 from condo_classifier.schema import ResidentRequest
 from condo_classifier.service import Classifier
-from condo_classifier.staff import new_request_id, resident_label, staff_card
+from condo_classifier.staff import (
+    new_request_id,
+    resident_label,
+    staff_card,
+    work_order_title,
+)
+from condo_classifier.trello import WorkOrders
 from condo_classifier.voice import VOICE_LANGUAGES, TranscriberChain, transcriber_from_env
 
 log = logging.getLogger(__name__)
@@ -71,12 +78,14 @@ class ResidentBot:
         staff_chat_id: int | None = None,
         translator: TranslatorChain | None = None,
         transcriber: TranscriberChain | None = None,
+        work_orders: WorkOrders | None = None,
     ):
         self.classifier = classifier
         self.chat = chat
         self.staff_chat_id = staff_chat_id
         self.translator = translator
         self.transcriber = transcriber
+        self.work_orders = work_orders
         self.conversations: dict[int, Conversation] = {}
         self.locks: dict[int, asyncio.Lock] = {}
         # Voice language each resident picked with /language. Survives /new, not restarts.
@@ -146,9 +155,9 @@ class ResidentBot:
     async def notify_staff(
         self, bot: Bot, chat_id: int, user: User, voice_file_id: str | None = None
     ) -> None:
-        """Post or update this request's card in the staff chat. Never blocks the resident."""
+        """Post or update this request's staff card and work order. Never blocks the resident."""
         conversation = self.conversations.get(chat_id)
-        if self.staff_chat_id is None or conversation is None:
+        if conversation is None or (self.staff_chat_id is None and self.work_orders is None):
             return
         result = conversation.last_result
         if result is None:
@@ -162,8 +171,27 @@ class ResidentBot:
             language=conversation.language,
             translation_failed=conversation.translation_failed,
         )
+        emergency = result.status == "safety_escalation"
+        if self.staff_chat_id is not None:
+            await self.notify_staff_chat(bot, conversation, card, emergency, voice_file_id)
+        if self.work_orders is not None:
+            try:
+                await self.work_orders.save(
+                    conversation, work_order_title(conversation.request_id, result), card, emergency
+                )
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                log.warning("Could not save the Trello work order: %s", type(exc).__name__)
+
+    async def notify_staff_chat(
+        self,
+        bot: Bot,
+        conversation: Conversation,
+        card: str,
+        emergency: bool,
+        voice_file_id: str | None,
+    ) -> None:
         # A first emergency gets a fresh message so it notifies; otherwise edit the card.
-        urgent = result.status == "safety_escalation" and not conversation.staff_alerted
+        urgent = emergency and not conversation.staff_alerted
         try:
             await self.post_card(bot, conversation, card, urgent)
             if voice_file_id:
@@ -337,6 +365,7 @@ def build_bot() -> ResidentBot:
         chat = ResidentChat.from_env() if replies == "chat" else None
         translator = translator_from_env()
         transcriber = transcriber_from_env()
+        work_orders = WorkOrders.from_env()
     except ValueError as exc:
         raise SystemExit(f"Check .env: {exc}") from exc
     staff_chat_id = os.getenv("STAFF_CHAT_ID", "").strip()
@@ -344,7 +373,7 @@ def build_bot() -> ResidentBot:
         raise SystemExit(
             "STAFF_CHAT_ID must be a number. Send /chatid in the staff chat to get it."
         )
-    if not staff_chat_id:
+    if not staff_chat_id and not work_orders:
         log.warning(
             "STAFF_CHAT_ID is not set, so requests are not sent to staff. "
             "Add the bot to the staff group and send /chatid there to get the ID."
@@ -355,11 +384,12 @@ def build_bot() -> ResidentBot:
             "languages reach the English classifier untranslated."
         )
     log.info(
-        "Classifier backend: %s. Replies: %s. Translation: %s. Voice: %s.",
+        "Classifier backend: %s. Replies: %s. Translation: %s. Voice: %s. Trello: %s.",
         backend_name,
         replies,
         os.getenv("TRANSLATE_WITH") or "off",
         os.getenv("TRANSCRIBE_WITH") or "off",
+        "on" if work_orders else "off",
     )
     return ResidentBot(
         Classifier(backend),
@@ -367,6 +397,7 @@ def build_bot() -> ResidentBot:
         int(staff_chat_id) if staff_chat_id else None,
         translator,
         transcriber,
+        work_orders,
     )
 
 
