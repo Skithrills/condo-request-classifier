@@ -28,12 +28,10 @@ def make_result(**changes):
     )
 
 
-def test_reply_is_short_and_names_team():
-    reply = resident_reply(make_result())
-    assert reply == (
-        "Got it, this one's for Maintenance team. Tap Submit below to send it to staff."
-    )
-    assert len(reply.split()) <= 30
+def test_reply_is_short_and_hides_routing():
+    reply = resident_reply(make_result(priority=Priority.HIGH))
+    # Team, priority and status are for staff to review, not shown to the resident.
+    assert reply == "Got it. Tap Submit below to send it to staff."
 
 
 def test_unclear_request_asks_for_more():
@@ -76,7 +74,7 @@ def bot_with(classifier, chat=None, **options):
 
 def test_fixed_replies_end_to_end(baseline):
     bot = bot_with(Classifier(baseline))
-    assert "Parking" in bot.reply_for(1, "A car is blocking my lot in the basement carpark, B1-22")
+    assert "Submit" in bot.reply_for(1, "A car is blocking my lot in the basement carpark, B1-22")
     assert "emergency number" in bot.reply_for(2, "Smoke is coming from the bin chute on level 7!")
     assert bot.reply_for(3, "?!") == INVALID
 
@@ -122,7 +120,7 @@ def test_emergency_uses_fixed_text_then_chat(baseline):
 def test_chat_failure_falls_back_to_fixed_reply(baseline):
     bot = bot_with(Classifier(baseline), FakeChat(reply=None))
     reply = bot.reply_for(1, "A car is blocking my lot in the basement carpark, B1-22")
-    assert "Parking" in reply
+    assert reply.startswith("Got it.")
     assert bot.conversations[1].messages[-1] == {"role": "assistant", "content": reply}
 
 

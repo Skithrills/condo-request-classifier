@@ -92,7 +92,6 @@ from condo_classifier.replies import (
     emergency_reply,
     quick_reply,
     resident_reply,
-    work_order_summary,
 )
 from condo_classifier.schema import Classification, Priority, ResidentRequest
 from condo_classifier.service import Classifier
@@ -124,16 +123,9 @@ from condo_classifier.voice import VOICE_LANGUAGES, TranscriberChain, transcribe
 
 log = logging.getLogger(__name__)
 
-# Reactions mark only status changes worth noticing; the typing indicator covers the rest.
-REACTIONS = {
-    "ready": ReactionEmoji.OK_HAND_SIGN,
-    "submitted": ReactionEmoji.SALUTING_FACE,
-    "needs_human": ReactionEmoji.PERSON_WITH_FOLDED_HANDS,
-    "emergency": ReactionEmoji.FACE_SCREAMING_IN_FEAR,
-    "problem": ReactionEmoji.THINKING_FACE,
-    # On a staff member's message in the staff group: it reached the resident.
-    "delivered": ReactionEmoji.THUMBS_UP,
-}
+# Only on a staff member's message in the staff group: it reached the resident. Residents
+# see no automatic status; staff review each request and update them themselves.
+REACTIONS = {"delivered": ReactionEmoji.THUMBS_UP}
 
 
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
@@ -759,7 +751,6 @@ class ResidentBot:
             if jpeg is not None:
                 description = await asyncio.to_thread(self.describer.describe, jpeg, caption)
             if description is None:
-                await self.react(context.bot, chat_id, message.message_id, "problem")
                 await message.reply_text(PHOTO_UNREADABLE)
                 return
             log.info("Photo described (%d chars)", len(description))
@@ -996,16 +987,12 @@ class ResidentBot:
         conversation = self.conversations.get(key)
         classified = conversation is not None and conversation.last_result is not previous
         if not classified or conversation.last_result.status == "provider_error":
-            await self.react(bot, chat_id, message.message_id, "problem")
             await message.reply_text(reply)
             return
-        if conversation.status == "ready":
-            reply = f"{reply}\n\n{work_order_summary(conversation.last_result)}"
         await self.clear_buttons(bot, chat_id, conversation)
         sent = await message.reply_text(reply, reply_markup=self.keyboard(conversation))
         if self.keyboard(conversation) is not None:
             conversation.buttons_message_id = sent.message_id
-        await self.react(bot, chat_id, message.message_id, conversation.status)
         await self.notify_staff(bot, conversation, voice_file_id=voice_file_id)
         if self.worth_tracking(conversation):
             await self.fetch_avatar(bot, user)
@@ -1081,7 +1068,6 @@ class ResidentBot:
         self.save(key, conversation)
         await self.clear_buttons(bot, chat_id, conversation)
         await send(reply)
-        await self.react(bot, chat_id, conversation.last_resident_message_id, conversation.status)
         # Asking for a person posts a fresh card so it notifies staff.
         await self.notify_staff(bot, conversation, fresh=action == "human")
         if action in {"submit", "cancel"}:

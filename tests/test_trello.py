@@ -178,7 +178,7 @@ def test_trello_failure_never_blocks_the_resident(baseline, orders, trello):
 
     trello.down = True
     bot = ResidentBot(Classifier(baseline), work_orders=orders)
-    assert "Maintenance" in run(bot, fake_bot(), 1, "The light keeps flickering")
+    assert run(bot, fake_bot(), 1, "The light keeps flickering").startswith("Got it.")
 
 
 class Clock:

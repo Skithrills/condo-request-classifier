@@ -255,7 +255,7 @@ def test_photo_of_fire_escalates_without_waiting(baseline, tmp_path):
     assert "emergency number" in reply
     assert chat.texts == []
     assert store.all()[0].status == "emergency"
-    assert tg.set_message_reaction.call_args.args[2] == "😱"
+    tg.set_message_reaction.assert_not_awaited()
 
 
 class UnclearBackend:

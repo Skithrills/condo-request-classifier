@@ -288,14 +288,15 @@ Photos are saved only once a request is understood. For off-topic photos the off
 baseline classifier can guess a category; `CLASSIFIER_BACKEND=claude` reads them better.
 
 **Buttons.** While the bot is still asking for details there are no buttons. Once a
-request has everything it needs, the bot shows a 📋 work-order summary with
-**✅ Submit**, **✖️ Cancel** and **🙋 Talk to a person**. Residents can also send
-`/human` at any time to get a staff member, which pings staff with a fresh card.
-Submitting or cancelling closes the request; the next message starts a new one.
+request has everything it needs, the bot shows **✅ Submit**, **✖️ Cancel** and
+**🙋 Talk to a person**. Residents can also send `/human` at any time to get a staff
+member, which pings staff with a fresh card. Submitting or cancelling closes the
+request; the next message starts a new one.
 
-**Reactions.** The bot reacts only when a request changes state: 👌 ready to submit ·
-🫡 submitted · 🙏 wants a person · 😱 emergency · 🤔 couldn't understand or something
-failed.
+**No automatic status for residents.** The category, team, priority and status the
+bot works out are for staff only: residents see no summary, reactions or routing in
+replies. Staff review each request and update the resident themselves, by replying
+to its card.
 
 Each request also appears in a staff Telegram group or channel as one card with
 the status, category, team, priority, location, missing details, review notes and the

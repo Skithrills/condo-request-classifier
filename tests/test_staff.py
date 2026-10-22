@@ -161,7 +161,7 @@ def test_staff_chat_failure_never_blocks_the_resident(baseline):
     bot = ResidentBot(Classifier(baseline), staff_chat_id=STAFF)
     staff_bot = fake_bot()
     staff_bot.send_message.side_effect = Forbidden("bot was kicked")
-    assert "Maintenance" in run(bot, staff_bot, 1, "The light keeps flickering")
+    assert run(bot, staff_bot, 1, "The light keeps flickering").startswith("Got it.")
 
 
 def test_no_staff_chat_configured(baseline):
@@ -259,7 +259,7 @@ def test_voice_note_is_echoed_classified_and_forwarded(baseline):
     heard, reply = send_voice(bot, staff_bot, 1)
     assert heard.startswith("🎙️ I heard: The light keeps flickering outside #05-12")
     assert "/language" in heard
-    assert "Maintenance" in reply
+    assert reply.startswith("Got it.")
     assert bot.conversations[1].said[0].voice
     assert "> 🎙️ The light keeps flickering" in staff_bot.send_message.call_args.args[1]
     forwarded = staff_bot.send_voice.call_args

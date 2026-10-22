@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 from condo_classifier.backends import backend_with_fallback, parse_fallbacks  # noqa: E402
 from condo_classifier.chat import ResidentChat  # noqa: E402
 from condo_classifier.knowledge import KnowledgeBase  # noqa: E402
-from condo_classifier.replies import quick_reply, work_order_summary  # noqa: E402
+from condo_classifier.replies import quick_reply  # noqa: E402
 from condo_classifier.service import Classifier  # noqa: E402
 from condo_classifier.telegram_bot import ResidentBot, build_chat  # noqa: E402
 
@@ -77,8 +77,6 @@ def main() -> None:
             if conversation is None:
                 print(f"Bot:      {reply}")
                 continue
-            if conversation.status == "ready":
-                reply = f"{reply}\n{work_order_summary(conversation.last_result)}"
             print("Bot:      " + reply.replace("\n", "\n          "))
             print(f"          [status: {conversation.status}, words: {len(reply.split())}]")
             if conversation.status == "ready":

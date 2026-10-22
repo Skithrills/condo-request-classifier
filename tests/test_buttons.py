@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from condo_classifier.chat import ready_to_submit
-from condo_classifier.replies import CLOSING, STALE, work_order_summary
+from condo_classifier.replies import CLOSING, STALE
 from condo_classifier.service import Classifier
 from condo_classifier.store import RequestRecord, RequestStore
 
@@ -71,28 +71,24 @@ def buttons(call):
     return [b.callback_data.split(":")[0] for row in markup.inline_keyboard for b in row]
 
 
-def last_reaction(tg):
-    return tg.set_message_reaction.call_args.args[2]
-
-
-def test_ready_request_shows_summary_and_submit(baseline, tmp_path):
+def test_ready_request_shows_submit_but_no_status(baseline, tmp_path):
     bot, store = make_bot(baseline, tmp_path)
     tg = fake_bot()
     first = send(bot, tg, "The corridor light keeps flickering")
     # No buttons while the bot is still asking for details.
     assert buttons(first) == []
-    tg.set_message_reaction.assert_not_awaited()  # nothing to flag yet
     ready = send(bot, tg, "It's outside #05-12", message_id=110)
     assert buttons(ready) == ["submit", "cancel", "human"]
-    assert "📋 Maintenance" in ready.args[0]
-    assert last_reaction(tg) == "👌"
+    # Category, team and status are for staff to review, not shown to the resident.
+    assert "📋" not in ready.args[0]
+    assert "Maintenance" not in ready.args[0]
 
     request_id = bot.conversations[1].request_id
     _, reply = tap(bot, tg, f"submit:{request_id}")
     assert request_id in reply.call_args.args[0]
     assert buttons(reply.call_args) == []
     assert store.get(request_id).status == "submitted"
-    assert last_reaction(tg) == "🫡"
+    tg.set_message_reaction.assert_not_awaited()
     assert "✅ Work order submitted" in tg.edit_message_text.call_args.args[0]
     assert 1 not in bot.conversations
 
@@ -144,7 +140,6 @@ def test_human_command_pings_staff_and_keeps_chatting(baseline, tmp_path):
     assert store.get(request_id).status == "needs_human"
     assert tg.send_message.await_count == 2  # fresh card so staff get notified
     assert tg.send_message.call_args.args[1].startswith("🙋 Resident wants a person")
-    assert last_reaction(tg) == "🙏"
     later = send(bot, tg, "It's outside #05-12", message_id=120)
     assert buttons(later) == []
     assert store.get(request_id).status == "needs_human"
@@ -175,7 +170,7 @@ def test_emergency_has_no_buttons(baseline, tmp_path):
     tg = fake_bot()
     call = send(bot, tg, "Smoke is coming from the bin chute on level 7!")
     assert buttons(call) == []
-    assert last_reaction(tg) == "😱"
+    tg.set_message_reaction.assert_not_awaited()
     assert store.all()[0].status == "emergency"
 
 
@@ -227,11 +222,11 @@ def test_greetings_are_not_sent_to_staff_until_understood(baseline, tmp_path):
     tg.send_message.assert_awaited_once()
 
 
-def test_invalid_message_gets_thinking_reaction(baseline, tmp_path):
+def test_invalid_message_gets_no_reaction(baseline, tmp_path):
     bot, _ = make_bot(baseline, tmp_path)
     tg = fake_bot()
     send(bot, tg, "?!")
-    assert last_reaction(tg) == "🤔"
+    tg.set_message_reaction.assert_not_awaited()
 
 
 def test_store_round_trip(tmp_path):
@@ -259,7 +254,7 @@ def test_store_round_trip(tmp_path):
         store.save(record)
 
 
-def test_ready_and_summary_helpers(baseline):
+def test_ready_helper(baseline):
     classifier = Classifier(baseline)
     from condo_classifier.schema import ResidentRequest
 
@@ -267,7 +262,6 @@ def test_ready_and_summary_helpers(baseline):
     located = classifier.classify(ResidentRequest(text="The light outside #05-12 flickers"))
     assert not ready_to_submit(vague)
     assert ready_to_submit(located)
-    assert work_order_summary(located).startswith("📋 Maintenance · #05-12")
 
 
 def test_deleted_requests_are_not_saved_again(baseline, tmp_path):

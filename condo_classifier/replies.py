@@ -4,7 +4,6 @@ import re
 from typing import NamedTuple
 
 from condo_classifier.schema import Category, Classification, Priority
-from condo_classifier.taxonomy import LABELS
 
 WELCOME = (
     "Hi! I'm the management office assistant.\n\n"
@@ -140,9 +139,8 @@ def resident_reply(result: Classification, language: str | None = None) -> str:
         return UNAVAILABLE
     if result.category == Category.OTHER:
         return "Can you tell me a bit more about what you need?"
-    reply = f"Got it, this one's for {result.suggested_team}."
-    if result.priority == Priority.HIGH:
-        reply += " Marked high priority."
+    # No team, priority or status: staff review the request and tell the resident themselves.
+    reply = "Got it."
     if result.missing_details:
         detail = result.missing_details[0]
         reply += f" Can you share the {detail[0].lower()}{detail[1:]}?"
@@ -203,17 +201,6 @@ _PLEASANTRY_WORD = (
 PLEASANTRY = re.compile(rf"^\W*{_PLEASANTRY_WORD}(?:[\W_]+{_PLEASANTRY_WORD})*\W*$", re.I)
 
 NOT_READY = "Add the missing details first."
-
-
-def work_order_summary(result: Classification) -> str:
-    """Compact work-order card shown above the Submit and Cancel buttons."""
-    parts = [LABELS[result.category].name]
-    if result.location:
-        parts.append(result.location)
-    lines = ["📋 " + " · ".join(parts), f"Team: {result.suggested_team}"]
-    if result.priority == Priority.HIGH:
-        lines.append("Priority: high")
-    return "\n".join(lines)
 
 
 def quick_reply(text: str, fresh: bool) -> str | None:
