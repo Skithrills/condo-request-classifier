@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -56,7 +57,16 @@ def trello():
 
 @pytest.fixture
 def orders(trello):
-    return WorkOrders("key", "token", "todo", "urgent", httpx.MockTransport(trello))
+    # Due dates have their own tests below.
+    return WorkOrders(
+        "key",
+        "token",
+        "todo",
+        "urgent",
+        httpx.MockTransport(trello),
+        emergency_hours=0,
+        high_hours=0,
+    )
 
 
 @pytest.fixture
@@ -169,3 +179,84 @@ def test_trello_failure_never_blocks_the_resident(baseline, orders, trello):
     trello.down = True
     bot = ResidentBot(Classifier(baseline), work_orders=orders)
     assert "Maintenance" in run(bot, fake_bot(), 1, "The light keeps flickering")
+
+
+class Clock:
+    def __init__(self):
+        self.now = datetime(2026, 10, 22, 9, 0, tzinfo=UTC)
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock():
+    return Clock()
+
+
+@pytest.fixture
+def timed(trello, clock):
+    return WorkOrders("key", "token", "todo", "urgent", httpx.MockTransport(trello), now=clock)
+
+
+def test_routine_requests_get_no_due_date(timed, trello):
+    asyncio.run(timed.save(Conversation(), "R-1", "flickering light", emergency=False))
+    assert "due" not in trello.cards["card1"]
+
+
+def test_high_priority_is_due_in_a_day_and_not_pushed_back(timed, trello, clock):
+    conversation = Conversation()
+    asyncio.run(timed.save(conversation, "R-1", "no water", False, high_priority=True))
+    assert trello.cards["card1"]["due"] == "2026-10-23T09:00:00.000Z"
+    # A detail added later keeps the deadline staff already see.
+    clock.now += timedelta(hours=3)
+    asyncio.run(timed.save(conversation, "R-1", "no water, #04-11", False, high_priority=True))
+    assert trello.cards["card1"]["due"] == "2026-10-23T09:00:00.000Z"
+
+
+def test_escalation_brings_the_due_date_forward(timed, trello, clock):
+    conversation = Conversation()
+    asyncio.run(timed.save(conversation, "R-1", "bin chute door", False, high_priority=True))
+    clock.now += timedelta(hours=2)
+    asyncio.run(timed.save(conversation, "🚨 R-1", "smoke", emergency=True))
+    assert trello.cards["card1"]["due"] == "2026-10-22T12:00:00.000Z"
+    assert trello.cards["card1"]["idList"] == "urgent"
+
+
+def test_recreated_card_keeps_its_due_date(timed, trello, clock):
+    conversation = Conversation()
+    asyncio.run(timed.save(conversation, "🚨 R-1", "fire", emergency=True))
+    trello.cards.clear()
+    clock.now += timedelta(minutes=30)
+    asyncio.run(timed.save(conversation, "🚨 R-1", "fire, block 3", emergency=True))
+    assert trello.cards["card1"]["due"] == "2026-10-22T10:00:00.000Z"
+
+
+@pytest.mark.parametrize("value", ["soon", "-2"])
+def test_bad_due_hours_are_explained(env, trello, monkeypatch, value):
+    monkeypatch.setenv("TRELLO_DUE_HIGH_HOURS", value)
+    with pytest.raises(ValueError, match="TRELLO_DUE_HIGH_HOURS must be a number"):
+        WorkOrders.from_env(httpx.MockTransport(trello))
+
+
+def test_zero_hours_turns_due_dates_off(env, trello, monkeypatch):
+    monkeypatch.setenv("TRELLO_DUE_EMERGENCY_HOURS", "0")
+    orders = WorkOrders.from_env(httpx.MockTransport(trello))
+    orders.transport = httpx.MockTransport(trello)
+    asyncio.run(orders.save(Conversation(), "🚨 R-1", "fire", emergency=True))
+    assert "due" not in trello.cards["card1"]
+
+
+def test_bot_sets_due_dates_by_priority(baseline, timed, trello):
+    from condo_classifier.telegram_bot import ResidentBot
+
+    bot = ResidentBot(Classifier(baseline), work_orders=timed)
+    run(bot, fake_bot(), 1, "my tap has no water since this morning at #04-11")
+    run(bot, fake_bot(), 2, "The corridor light keeps flickering at #05-12")
+    run(bot, fake_bot(), 3, "There is smoke coming from the bin chute at block 3!")
+    due = {card["desc"].splitlines()[-1]: card.get("due") for card in trello.cards.values()}
+    assert due == {
+        "> my tap has no water since this morning at #04-11": "2026-10-23T09:00:00.000Z",
+        "> The corridor light keeps flickering at #05-12": None,
+        "> There is smoke coming from the bin chute at block 3!": "2026-10-22T10:00:00.000Z",
+    }

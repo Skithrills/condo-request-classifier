@@ -451,6 +451,13 @@ private. The card is updated as the resident adds details. Staff move cards
 between lists themselves; the bot never moves a card back. If Trello is down, the
 resident is still answered and the bot logs a warning.
 
+Urgent work orders get a Trello due date so the board shows what is overdue:
+emergencies are due 1 hour after they come in, high-priority requests (no water,
+flooding, a power outage, a stuck lift) 24 hours after. Routine requests get none. If a request escalates
+later, its due date moves earlier; added details never push it back, and a date
+staff change on the card is kept. Change the hours with `TRELLO_DUE_EMERGENCY_HOURS`
+and `TRELLO_DUE_HIGH_HOURS`, or set one to `0` for no due date.
+
 You need to be a member of the board, and an admin of a Trello Workspace to create
 the app. It is free.
 
@@ -513,6 +520,7 @@ real resident use.
 | `STAFF_CHAT_ID` | not set | Staff group or channel that receives request cards |
 | `TRELLO_BOARD_ID` | not set | Trello board for work orders; needs `TRELLO_API_KEY` and `TRELLO_TOKEN` |
 | `TRELLO_TODO_LIST` / `TRELLO_URGENT_LIST` | `To Do` / `Urgent` | Lists for new requests and emergencies |
+| `TRELLO_DUE_EMERGENCY_HOURS` / `TRELLO_DUE_HIGH_HOURS` | `1` / `24` | Due date for emergency and high-priority work orders; `0` for none |
 | `BOT_REPLIES` | `claude` | `claude` (or `chat`) or `ollama` for model replies, `fixed` for templates |
 | `CHAT_FALLBACK` | `none` | Chat models to try when the main one fails, e.g. `ollama` |
 | `CLASSIFIER_BACKEND` | `baseline` | `baseline`, `ollama` or `claude` |

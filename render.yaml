@@ -35,7 +35,9 @@ services:
       - key: CLASSIFIER_BACKEND
         value: baseline
       # Trello work orders (optional): new requests go to To Do, emergencies to Urgent.
-      # Leave TRELLO_BOARD_ID empty to turn them off.
+      # Leave TRELLO_BOARD_ID empty to turn them off. Emergencies are due in 1 hour and
+      # high-priority requests in 24; change with TRELLO_DUE_EMERGENCY_HOURS and
+      # TRELLO_DUE_HIGH_HOURS in the dashboard.
       - key: TRELLO_BOARD_ID
         sync: false
       - key: TRELLO_API_KEY

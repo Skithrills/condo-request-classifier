@@ -9,6 +9,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol
 
 import anthropic
@@ -107,9 +108,10 @@ class Conversation:
     # Store bookkeeping: saved at least once, and whether staff have since deleted it.
     saved: bool = False
     deleted: bool = False
-    # Trello work order for this request, and whether it was moved to Urgent.
+    # Trello work order for this request, whether it was moved to Urgent, and its due date.
     work_order_id: str | None = None
     work_order_urgent: bool = False
+    work_order_due: datetime | None = None
 
     @property
     def resident_texts(self) -> list[str]:

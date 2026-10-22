@@ -586,6 +586,7 @@ class ResidentBot:
                     work_order_title(conversation.request_id, result),
                     card,
                     conversation.status == "emergency",
+                    high_priority=result.priority == Priority.HIGH,
                 )
             except (httpx.HTTPError, ValueError, KeyError) as exc:
                 log.warning("Could not save the Trello work order: %s", type(exc).__name__)
