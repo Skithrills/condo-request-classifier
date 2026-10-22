@@ -61,6 +61,15 @@ def test_invalid_input_rejected(text):
         "Elevator stuck with my son inside",
         "lift stuck between floors, my kid is in it",
         "My mum is in the lift and it's stuck",
+        "the lift at block c is stuck at level 20 and i hear banging inside the lift",
+        "Someone is shouting from the elevator at block 2",
+        "there is a man holding what seems to be a kitchen knife at my staircase. i dont "
+        "know his intentions but i want to be safe so please get a security guard here",
+        "A guy with a parang is walking around the carpark",
+        "Armed man at the lobby",
+        "my dog is trapped at the aircon ledge outside my window at block b",
+        "My son climbed onto the window ledge on level 12",
+        "There's a cat stuck on the parapet of block 4",
     ],
 )
 def test_emergency_does_not_wait_for_backend(text):
@@ -94,6 +103,11 @@ def test_emergency_does_not_wait_for_backend(text):
         "The lift is stuck on level 3",
         "The lift keeps stopping between floors and the doors take ages to open",
         "Lift B is stuck, nobody inside",
+        "The lift at Block C keeps getting stuck between floors.",
+        "The lift door makes a banging noise when it closes",
+        "Can I borrow a knife sharpener from the management office?",
+        "The window ledge outside my unit has pigeon droppings",
+        "Pigeons keep sitting on the aircon ledge",
     ],
 )
 def test_hypothetical_and_negated_reports_not_emergencies(text):

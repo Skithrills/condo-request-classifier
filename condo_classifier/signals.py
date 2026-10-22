@@ -50,7 +50,34 @@ EMERGENCY_PATTERNS = (
         r"dad|father|grandma|grandpa|i'm|i am|we're|we are)\b.{0,30}?\b(?:in|inside) "
         r"(?:the |a |our )?(?:lift|elevator)\b.{0,30}?\b(?:stuck|stopped|jammed)\b",
     ),
+    # Sounds that mean someone is inside a stuck lift: "stuck at level 20 and I hear
+    # banging inside the lift", "shouting from the elevator".
+    (
+        Category.MAINTENANCE,
+        r"\b(?:lift|elevator)s?\b.{0,60}?\b(?:stuck|stopped|jammed|broke down|broken down)\b"
+        r".{0,60}?\b(?:bang\w*|knock\w*|shout\w*|scream\w*|yell\w*|cry\w*|call\w* for help)\b|"
+        r"\b(?:bang\w*|knock\w*|shout\w*|scream\w*|yell\w*|cry\w*|call\w* for help)\b"
+        r".{0,20}?\b(?:in|inside|from) (?:the |a |our )?(?:lift|elevator)\b",
+    ),
     (Category.MAINTENANCE, r"\b(?:sparks|sparking|exposed live wire|electrocut\w*)\b"),
+    # Weapons: "a man holding what seems to be a kitchen knife at my staircase".
+    (
+        Category.SECURITY,
+        r"\b(?:holding|carrying|waving|brandishing|wielding|pointing|with|has|had|got)\b"
+        r"[^.!?\n]{0,40}?\b(?:knife|knives|gun|pistol|rifle|parang|machete|cleaver|chopper|"
+        r"axe|weapon)s?\b|"
+        r"\barmed (?:man|men|person|people|intruder|robber|stranger)\b|"
+        r"\b(?:stabb(?:ed|ing)|shooting|gunshots?|shots fired)\b",
+    ),
+    # A person or animal about to fall: "dog trapped at the aircon ledge",
+    # "my son climbed onto the window ledge".
+    (
+        Category.SECURITY,
+        r"\b(?:someone|somebody|person|man|woman|boy|girl|child|kid|baby|son|daughter|"
+        r"toddler|dog|puppy|cat|kitten|pet|bird)\b[^.!?\n]{0,40}?\b(?:on|onto|at|over|"
+        r"outside|climb\w*|trapped|stuck|stranded|hanging|dangling)\b[^.!?\n]{0,25}?"
+        r"\b(?:ledge|parapet|railing|window sill|windowsill|roof edge|aircon ledge)\b",
+    ),
     (Category.SECURITY, r"\b(?:attacking|assaulting|unconscious|not breathing)\b"),
     # Injuries and medical emergencies: a person who is hurt right now.
     (
