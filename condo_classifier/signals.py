@@ -23,14 +23,14 @@ EMERGENCY_PATTERNS = (
         Category.MAINTENANCE,
         r"\b(?:there(?:'s| is| are)|i (?:can )?see) (?:a |some )?(?:fire|smoke|flames)\b",
     ),
-    (Category.MAINTENANCE, r"\bfire (?:in|at|on|inside|near|spreading)\b"),
+    (Category.MAINTENANCE, r"\bfire? (?:in|at|on|inside|near|spreading)\b"),
     (Category.MAINTENANCE, r"\b(?:caught|catching|catch) fire\b|\b(?:is|are) (?:burning|ablaze)\b"),
     (
         Category.MAINTENANCE,
         r"\b(?:full of|filled with) smoke\b|\bsmoke everywhere\b|"
-        r"\bburning smell\b|\bsmell(?:s|ing)? (?:of )?burning\b",
+        r"\b(?:burning|burnt) smell\b|\bsmell(?:s|ing)? (?:of )?(?:burning|burnt)\b",
     ),
-    (Category.MAINTENANCE, r"\b(?:gas leak|smell (?:of )?gas|smelling gas)\b"),
+    (Category.MAINTENANCE, r"\b(?:gas leak|sme?ll? (?:of )?gas|smelling gas|gas smell)\b"),
     (
         Category.MAINTENANCE,
         r"\b(?:trapped|stuck) (?:inside |in )(?:the |a |our )?(?:lift|elevator)\b",
@@ -40,7 +40,7 @@ EMERGENCY_PATTERNS = (
     (
         Category.MAINTENANCE,
         r"\b(?:lift|elevator)s?\b.{0,40}?\b(?:stuck|stopped|jammed|broke down|broken down)\b"
-        r".{0,40}?\b(?:someone|somebody|people|persons?|passengers?|residents?|kids?|"
+        r".{0,40}?\b(?:someone|somebody|people|ppl|persons?|passengers?|residents?|kids?|"
         r"child(?:ren)?|son|daughter|baby|mum|mom|mother|dad|father|grandma|grandpa|elderly|"
         r"i'm|i am|we're|we are)\b",
     ),
@@ -49,6 +49,15 @@ EMERGENCY_PATTERNS = (
         r"\b(?:someone|somebody|people|kids?|child(?:ren)?|son|daughter|baby|mum|mom|mother|"
         r"dad|father|grandma|grandpa|i'm|i am|we're|we are)\b.{0,30}?\b(?:in|inside) "
         r"(?:the |a |our )?(?:lift|elevator)\b.{0,30}?\b(?:stuck|stopped|jammed)\b",
+    ),
+    # A person stuck inside something, often said in a later message than the lift:
+    # "wait someone is stuck inside". Only right after the person word, so "my kid's toy is
+    # stuck inside the machine" stays a repair.
+    (
+        Category.MAINTENANCE,
+        r"\b(?:someone|somebody|people|ppl|person|child|kid|son|daughter|baby|mum|mom|"
+        r"dad|grandma|grandpa)(?: is| are| has been| have been| got)? (?:stuck|trapped) "
+        r"inside\b",
     ),
     # Sounds that mean someone is inside a stuck lift: "stuck at level 20 and I hear
     # banging inside the lift", "shouting from the elevator".
@@ -59,13 +68,22 @@ EMERGENCY_PATTERNS = (
         r"\b(?:bang\w*|knock\w*|shout\w*|scream\w*|yell\w*|cry\w*|call\w* for help)\b"
         r".{0,20}?\b(?:in|inside|from) (?:the |a |our )?(?:lift|elevator)\b",
     ),
-    (Category.MAINTENANCE, r"\b(?:sparks|sparking|exposed live wire|electrocut\w*)\b"),
+    (Category.MAINTENANCE, r"\b(?:sparks|sparking|(?:exposed )?live wires?|electrocut\w*)\b"),
+    # Water reaching electrics: "water pouring into the switch room", "sockets underwater".
+    (
+        Category.MAINTENANCE,
+        r"\b(?:water|flood(?:ing|ed|s)?)\b[^.!?\n]{0,40}?\b(?:into|onto|reaching|over) "
+        r"(?:the |my |our |an? )?(?:switch ?room|electrical \w+|power (?:sockets?|points?)|"
+        r"sockets?|light fittings?|db box|distribution board|wiring)\b|"
+        r"\b(?:sockets?|power points?|electrical \w+|switch ?room|wiring|wires)\b"
+        r"[^.!?\n]{0,30}?\b(?:underwater|under water|submerged)\b",
+    ),
     # Weapons: "a man holding what seems to be a kitchen knife at my staircase".
     (
         Category.SECURITY,
         r"\b(?:holding|carrying|waving|brandishing|wielding|pointing|with|has|had|got)\b"
-        r"[^.!?\n]{0,40}?\b(?:knife|knives|gun|pistol|rifle|parang|machete|cleaver|chopper|"
-        r"axe|weapon)s?\b|"
+        r"[^.!?\n]{0,40}?(?<!toy )(?<!water )(?<!nerf )(?<!glue )\b(?:knife|knives|gun|pistol|"
+        r"rifle|parang|machete|cleaver|chopper|axe|weapon)s?\b(?! ?(?:sharpen|set|block|rack))|"
         r"\barmed (?:man|men|person|people|intruder|robber|stranger)\b|"
         r"\b(?:stabb(?:ed|ing)|shooting|gunshots?|shots fired)\b",
     ),
@@ -79,6 +97,12 @@ EMERGENCY_PATTERNS = (
         r"\b(?:ledge|parapet|railing|window sill|windowsill|roof edge|aircon ledge)\b",
     ),
     (Category.SECURITY, r"\b(?:attacking|assaulting|unconscious|not breathing)\b"),
+    # "lying in the corridor and not moving", "screaming for help from #10-06".
+    (
+        Category.SECURITY,
+        r"\b(?:lying|laying|lies)\b[^.!?\n]{0,50}?\b(?:not moving|motionless|unresponsive|"
+        r"not responding)\b|\b(?:scream\w*|shout\w*|yell\w*|cry\w*|calling) for help\b",
+    ),
     # Injuries and medical emergencies: a person who is hurt right now.
     (
         Category.SECURITY,
@@ -98,21 +122,32 @@ OTHER_LANGUAGE_EMERGENCY_PATTERNS = (
     # Chinese (simplified and traditional)
     (Category.MAINTENANCE, r"着火|著火|起火|失火|火灾|火災|冒烟|冒煙|浓烟|濃煙"),
     (Category.MAINTENANCE, r"煤气泄漏|煤氣洩漏|漏气|漏氣|闻到煤气|聞到煤氣|燃气泄漏"),
-    (Category.MAINTENANCE, r"(?:困|关|關)在电梯|(?:困|关|關)在電梯|电梯里被困|電梯裡被困"),
+    (
+        Category.MAINTENANCE,
+        r"(?:困|关|關)在电梯|(?:困|关|關)在電梯|电梯里被困|電梯裡被困|电梯.{0,12}被困|電梯.{0,12}被困",
+    ),
     (Category.MAINTENANCE, r"触电|觸電|冒火花"),
-    (Category.SECURITY, r"昏迷|不省人事|没有呼吸|沒有呼吸|被攻击|被攻擊"),
+    (Category.SECURITY, r"昏迷|不省人事|没有呼吸|沒有呼吸|被攻击|被攻擊|晕倒|暈倒"),
     # Malay
     (Category.MAINTENANCE, r"\b(?:kebakaran|terbakar|asap tebal)\b"),
     (Category.MAINTENANCE, r"\b(?:bocor gas|kebocoran gas|bau gas)\b"),
-    (Category.MAINTENANCE, r"\b(?:terperangkap|tersekat) (?:dalam |di dalam )?lif\b"),
+    (
+        Category.MAINTENANCE,
+        r"\b(?:terperangkap|tersekat) (?:dalam |di dalam )?lif\b|"
+        r"\blif\b.{0,30}?\b(?:terperangkap|tersekat)\b",
+    ),
     (Category.MAINTENANCE, r"\b(?:renjatan elektrik|kejutan elektrik)\b"),
     (Category.SECURITY, r"\b(?:pengsan|tidak sedarkan diri|tak sedarkan diri|tidak bernafas)\b"),
+    (
+        Category.SECURITY,
+        r"\b(?:bawa|pegang|acu|dengan) (?:sebilah )?(?:pisau|parang)\b|\bbersenjata\b",
+    ),
     # Tamil
     (Category.MAINTENANCE, r"தீப்பிடி|தீ விபத்து|புகை வருகிறது"),
     (Category.MAINTENANCE, r"எரிவாயு கசிவு|கேஸ் கசிவு"),
     (Category.MAINTENANCE, r"லிஃப்டில் சிக்கி|லிப்டில் சிக்கி|மின்தூக்கியில் சிக்கி"),
     (Category.MAINTENANCE, r"மின்சாரம் தாக்கி"),
-    (Category.SECURITY, r"மயக்கம்|மூச்சு விடவில்லை"),
+    (Category.SECURITY, r"மயக்கம்|மூச்சு விடவில்லை|கத்தியுடன்"),
 )
 # "No fire" style negation right before the phrase. Tamil negates after the verb, so it has none.
 OTHER_LANGUAGE_NEGATION = re.compile(
@@ -120,7 +155,8 @@ OTHER_LANGUAGE_NEGATION = re.compile(
 )
 HYPOTHETICAL = re.compile(
     r"\b(?:what (?:should|would|do)|in case of|if there|if someone|fire drill|"
-    r"fire safety|evacuation plan|training exercise|yesterday|last week|resolved)\b",
+    r"fire safety|evacuation plan|training exercise|yesterday|last (?:week|month|year)|"
+    r"\w+ (?:days|weeks|months|years) ago|resolved)\b",
     re.I,
 )
 NEGATION = re.compile(r"\b(?:no|not|never|without|isn't|isnt|wasn't|wasnt)\b", re.I)

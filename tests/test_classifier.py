@@ -70,6 +70,19 @@ def test_invalid_input_rejected(text):
         "my dog is trapped at the aircon ledge outside my window at block b",
         "My son climbed onto the window ledge on level 12",
         "There's a cat stuck on the parapet of block 4",
+        # Missed by the offline classification check (reports/classification-check.md).
+        "lift stuck at block 2 with ppl inside",
+        "water pouring into the switch room and the power sockets are underwater",
+        "flood in the electrical riser, live wires in the water",
+        "smel gas at my kitchen pls help",
+        "ther is a fir in the lift lobby!!!",
+        "lift at block 3 not working\nwait someone is stuck inside, I can hear them shouting",
+        "Bro the guy from #04-02 is lying in the corridor outside his door and he's not "
+        "moving at all. Probably drunk idk.",
+        "Water is pouring from my ceiling onto the light fitting and it's making a crackling "
+        "buzzing sound, smells burnt.",
+        "Someone's been screaming for help from #10-06 for like 10 minutes and nobody is "
+        "opening the door.",
     ],
 )
 def test_emergency_does_not_wait_for_backend(text):
@@ -108,6 +121,16 @@ def test_emergency_does_not_wait_for_backend(text):
         "Can I borrow a knife sharpener from the management office?",
         "The window ledge outside my unit has pigeon droppings",
         "Pigeons keep sitting on the aircon ledge",
+        # False alarms found by the offline classification check.
+        "The guy at #06-02 has a knife sharpening business, is that allowed?",
+        "my dad slipped on the wet floor at the pool last month, please put up a sign",
+        "My son is playing with a toy gun at the playground, is that allowed?",
+        # Near misses for the rules added after that check.
+        "Someone has a knife set for sale at the flea market, is that allowed?",
+        "The floodlight over the electrical box at the carpark is broken",
+        "My kid's toy is stuck inside the vending machine",
+        "the fir tree in the garden needs trimming",
+        "The wiring in my unit is old, can someone check it?",
     ],
 )
 def test_hypothetical_and_negated_reports_not_emergencies(text):
@@ -125,6 +148,11 @@ def test_hypothetical_and_negated_reports_not_emergencies(text):
         "Ada bau gas di dapur",
         "வீட்டில் தீப்பிடித்து விட்டது",
         "லிஃப்டில் சிக்கி இருக்கிறேன்",
+        "有人晕倒了，在大堂",
+        "电梯坏了，我妈妈被困在里面",
+        "lif rosak, anak saya terperangkap di dalam",
+        "Ada lelaki bawa pisau di tangga blok 3",
+        "கத்தியுடன் ஒருவர் படிக்கட்டில் நிற்கிறார்",
     ],
 )
 def test_chinese_malay_and_tamil_emergencies_escalate_untranslated(text):
